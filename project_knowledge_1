@@ -1,0 +1,954 @@
+**PROPOSAL PROYEK AKHIR**
+
+**PREDIKSI TINGKAT HUNIAN KAMAR DHARMA UTAMA HOTEL MENGGUNAKAN ALGORITMA
+LONG-SHORT TERM MEMORY (LSTM)**
+
+![logo PCR.jpg](media/image1.jpeg){width="3.65625in"
+height="0.6458333333333334in"}
+
+**Disusun oleh :**
+
+**MOHAMAD HAZIQ DAFREN BIN MOHAMAD HAZNI**
+
+**NIM. 2355301119**
+
+**PROGRAM STUDI TEKNIK INFORMATIKA**
+
+**POLITEKNIK CALTEX RIAU**
+
+**2025**
+
+# RINGKASAN {#ringkasan .unnumbered}
+
+Penelitian ini bertujuan untuk menganalisis dan memprediksi tingkat
+hunian pada Hotel Dharma Utama menggunakan algoritma *Long Short-Term
+Memory* (LSTM). Permasalahan utama yang dihadapi hotel adalah proses
+pengelolaan data operasional yang masih dilakukan secara tradisional
+tanpa dukungan sistem analitik yang terintegrasi. Hal ini menyebabkan
+pengambilan keputusan manajerial, terutama dalam perencanaan operasional
+dan strategi pemasaran, belum berbasis pada data historis yang terukur.
+
+Melalui penelitian ini, dilakukan pengumpulan dan pembersihan data
+okupansi serta omzet hotel pada periode 2022--2025 yang diperoleh dari
+pihak manajemen. Data tersebut akan diolah untuk menghasilkan model
+prediksi tingkat hunian secara bulanan. Diharapkan hasil penelitian ini
+dapat menjadi alat bantu analisis bagi manajemen Hotel Dharma Utama
+dalam meningkatkan efisiensi pengelolaan dan mendukung pengambilan
+keputusan operasional yang lebih tepat berbasis data.
+
+**Kata kunci** : Prediksi Tingkat Hunian, Hotel Dharma Utama, LSTM,
+D*ata Time Series*, Analisis Data.
+
+#  DAFTAR ISI {#daftar-isi .unnumbered}
+
+#  {#section .TOC-Heading .unnumbered}
+
+[RINGKASAN [i](#ringkasan)](#ringkasan)
+
+[DAFTAR ISI [ii](#daftar-isi)](#daftar-isi)
+
+[1. I. PENDAHULUAN [3](#i.-pendahuluan)](#i.-pendahuluan)
+
+[1.1 Latar Belakang [3](#latar-belakang)](#latar-belakang)
+
+[1.2 Perumusan Masalah [5](#perumusan-masalah)](#perumusan-masalah)
+
+[1.3 Batasan Masalah [5](#batasan-masalah)](#batasan-masalah)
+
+[1.4 Tujuan dan Manfaat [6](#tujuan-dan-manfaat)](#tujuan-dan-manfaat)
+
+[1.4.1 Tujuan [6](#tujuan)](#tujuan)
+
+[1.4.2 Manfaat [6](#manfaat)](#manfaat)
+
+[1.5 Metodologi Penelitian
+[6](#metodologi-penelitian)](#metodologi-penelitian)
+
+[1.6 Sistematika Penulisan
+[7](#sistematika-penulisan)](#sistematika-penulisan)
+
+[2. II. TINJAUAN PUSTAKA
+[9](#ii.-tinjauan-pustaka)](#ii.-tinjauan-pustaka)
+
+[2.1 Penelitian Terdahulu
+[9](#penelitian-terdahulu)](#penelitian-terdahulu)
+
+[2.2 Landasan Teori [15](#landasan-teori)](#landasan-teori)
+
+[2.2.1 Konsep Okupansi Hotel
+[15](#konsep-okupansi-hotel)](#konsep-okupansi-hotel)
+
+[2.2.2 Data dan Pengolahan Data
+[17](#data-dan-pengolahan-data)](#data-dan-pengolahan-data)
+
+[2.2.3 Konsep Machine Learning dan Deep Learning
+[20](#konsep-machine-learning-dan-deep-learning)](#konsep-machine-learning-dan-deep-learning)
+
+[2.2.4 Algoritma *Long Short-Term Memory (*LSTM)
+[22](#algoritma-long-short-term-memory-lstm)](#algoritma-long-short-term-memory-lstm)
+
+[2.2.5 Bahasa Pemograman Python
+[23](#bahasa-pemograman-python)](#bahasa-pemograman-python)
+
+[2.2.6 Evaluasi Model [24](#evaluasi-model)](#evaluasi-model)
+
+[2.2.7 Implementasi Sistem Prediksi
+[25](#implementasi-sistem-prediksi)](#implementasi-sistem-prediksi)
+
+[3. Daftar Pustaka [28](#_Toc213327593)](#_Toc213327593)
+
+# I. PENDAHULUAN
+
+## Latar Belakang
+
+Perkembangan teknologi informasi dan kecerdasan buatan telah membawa
+banyak peluang baru dalam berbagai bidang, termasuk industri perhotelan.
+Penerapan teknologi kini tidak hanya sebatas mendukung aktivitas
+operasional, tetapi juga dapat menjadi alat bantu dalam memahami pola
+data serta mendukung proses pengambilan keputusan untuk mendukung
+keputusan bisnis. Salah satu aspek penting dalam pengelolaan hotel yang
+dapat dikaji melalui pendekatan tersebut adalah tingkat hunian kamar
+(*occupancy rate*), yang sering dijadikan dasar dalam menentukan
+strategi pengelolaan dan perencanaan kegiatan hotel.
+
+Dharma Utama Hotel merupakan hotel berbintang dua yang telah beroperasi
+selama lebih dari 25 tahun dan berlokasi di pusat Kota Pekanbaru,
+tepatnya di depan Ramayana. Dengan posisinya yang berada di tengah kota,
+hotel ini sering menjadi pilihan bagi rombongan, keluarga, maupun
+pebisnis yang mencari lokasi menginap yang mudah dijangkau. Hingga saat
+ini, pencatatan data okupansi masih dilakukan menggunakan lembar kerja
+Excel, di mana proses pencatatan dilakukan oleh pegawai front office dan
+hasil rekapitulasi diolah oleh manajer hotel. Cara ini memang cukup
+membantu kegiatan administrasi, namun belum memungkinkan untuk melakukan
+analisis data secara lebih mendalam.
+
+Berdasarkan kondisi tersebut, muncul kebutuhan untuk mengembangkan
+sebuah sistem yang mampu melakukan analisis dan prediksi terhadap
+tingkat hunian hotel secara otomatis dengan memanfaatkan data historis
+yang telah ada. Salah satu metode yang sesuai untuk kebutuhan tersebut
+adalah algoritma *Long Short-Term Memory* (LSTM), yaitu bagian dari
+*Recurrent Neural Network* (RNN) yang dirancang untuk mengenali pola
+dari data deret waktu (*time series*). Dalam penelitian ini, model LSTM
+akan dibangun menggunakan data okupansi Dharma Utama Hotel dari tahun
+2021 hingga 2025. Walaupun terdapat beberapa data yang tidak lengkap,
+nilai rata-rata harga kamar harian dapat digunakan untuk memperluas
+dataset sehingga model dapat mengenali pola yang lebih beragam.
+
+Model yang dikembangkan diharapkan dapat memberikan gambaran mengenai
+tingkat hunian bulanan hotel pada periode selanjutnya. Informasi
+tersebut dapat menjadi bahan pertimbangan bagi pihak manajemen dalam
+merencanakan strategi ke depan, seperti perencanaan layanan, kegiatan
+promosi, atau pengelolaan sumber daya. Selain itu, model ini juga
+dirancang agar dapat terus diperbarui secara berkala dengan data terbaru
+dari pihak hotel, sehingga performanya dapat terus meningkat seiring
+waktu.
+
+Pengembangan model akan dilakukan menggunakan *Google Colab* sebagai
+media pemrosesan dan pelatihan data. Hasilnya kemudian akan
+diintegrasikan ke dalam sistem berbasis web menggunakan framework
+Laravel (PHP), yang dipilih karena kemudahan pengelolaan serta
+ketersediaan sumber daya pendukung yang luas. Dengan adanya sistem ini,
+diharapkan pihak hotel dapat memiliki alat bantu yang memberikan wawasan
+baru dalam memahami pola okupansi dan mendukung proses pengambilan
+keputusan yang lebih terarah.
+
+Penelitian ini bertujuan untuk mengembangkan model prediksi tingkat
+hunian kamar Dharma Utama Hotel menggunakan algoritma LSTM, serta
+mengimplementasikan hasilnya dalam bentuk dashboard interaktif. Sistem
+yang dihasilkan diharapkan dapat menjadi alat bantu analisis yang
+praktis, memperkuat proses pengelolaan hotel, dan mendukung perencanaan
+operasional yang lebih terukur.
+
+## Perumusan Masalah
+
+Berdasarkan latar belakang di atas, rumusan masalah yang akan dibahas
+dalam penelitian ini adalah sebagai berikut:
+
+1)  Bagaimana mengolah dan mempersiapkan data historis okupansi Dharma
+    Utama Hotel agar dapat digunakan dalam model prediksi berbasis *time
+    series*?
+
+2)  Bagaimana penerapan algoritma *Long Short-Term Memory* (LSTM) dalam
+    memprediksi tingkat hunian kamar berdasarkan data historis hotel
+    dari tahun 2021 hingga 2025?
+
+3)  Bagaimana menampilkan hasil prediksi tingkat hunian dalam bentuk
+    dashboard berbasis web yang informatif dan mudah dipahami oleh
+    manajemen hotel?
+
+## Batasan Masalah
+
+Agar penelitian ini berjalan dengan fokus dan sesuai tujuan, beberapa
+batasan ditetapkan sebagai berikut:
+
+1)  Data yang digunakan merupakan data historis Dharma Utama Hotel dari
+    tahun 2021 hingga 2025, meskipun terdapat beberapa kekosongan data
+    pada tahun-tahun tertentu.
+
+2)  Jika ditemukan data yang tidak lengkap, maka pendekatan rata-rata
+    harga kamar harian akan digunakan untuk memperkirakan tingkat
+    okupansi.
+
+3)  Model prediksi yang digunakan adalah *Long Short-Term Memory* (LSTM)
+    yang dikembangkan menggunakan *Google Colab* sebagai lingkungan
+    pemrograman.
+
+4)  Hasil prediksi yang dihasilkan berupa tingkat hunian bulanan.
+
+5)  Implementasi sistem dilakukan menggunakan framework Laravel dan PHP
+    untuk menampilkan hasil prediksi dalam bentuk dashboard sederhana.
+
+6)  Penelitian ini berfokus pada pembangunan model dan penyajian hasil
+    prediksi, bukan pada integrasi dengan sistem reservasi atau
+    manajemen hotel secara langsung.
+
+## Tujuan dan Manfaat
+
+### Tujuan
+
+> Penelitian ini bertujuan untuk membangun model prediksi tingkat hunian
+> kamar Dharma Utama Hotel menggunakan algoritma *Long Short-Term
+> Memory* (LSTM) berdasarkan data okupansi dari tahun 2021 hingga 2025.
+> Model ini dikembangkan untuk menghasilkan perkiraan tingkat hunian
+> bulanan yang dapat membantu pihak manajemen memahami pola dan tren
+> okupansi di masa mendatang. Hasil prediksi akan disajikan dalam bentuk
+> dashboard berbasis web menggunakan framework Laravel sebagai media
+> penyajian informasi penelitian.
+
+### Manfaat
+
+> Penelitian ini diharapkan dapat memberikan beberapa manfaat, baik
+> secara praktis maupun akademis, antara lain:
+
+1)  Bagi pihak hotel, penelitian ini dapat menjadi acuan awal dalam
+    penerapan teknologi berbasis data dan kecerdasan buatan untuk
+    memahami pola okupansi dan membantu proses pengambilan keputusan.
+
+2)  Bagi peneliti, penelitian ini menjadi kesempatan untuk memperdalam
+    pemahaman tentang pengolahan data deret waktu dan penerapan
+    algoritma LSTM dalam konteks industri perhotelan.
+
+3)  Bagi akademik atau pihak lain, penelitian ini dapat dijadikan
+    referensi dalam pengembangan studi serupa yang menggabungkan
+    analisis data dengan teknologi prediktif.
+
+## Metodologi Penelitian
+
+Metodologi yang digunakan dalam penelitian ini meliputi beberapa tahapan
+utama sebagai berikut:
+
+1)  **Pengumpulan Data\
+    ** Data yang digunakan merupakan data historis okupansi Dharma Utama
+    Hotel dari tahun 2021 hingga 2025 yang diperoleh dari catatan
+    internal dalam format Excel.
+
+2)  **Pra-pemprosesan Data (*Preprocessing*)**
+
+> Data akan melalui proses pembersihan, normalisasi, dan penyesuaian
+> agar dapat digunakan pada model LSTM. Beberapa penyesuaian seperti
+> pengisian data yang kosong dan konversi format tanggal dilakukan untuk
+> memastikan konsistensi data.
+
+3)  **Pembuatan Model LSTM\
+    ** Model prediksi dibangun menggunakan algoritma *Long Short-Term
+    Memory* (LSTM) pada *Google Colab* untuk mempelajari pola okupansi
+    berdasarkan data historis.
+
+4)  **Evaluasi Model\
+    ** Model yang dihasilkan akan dievaluasi menggunakan metrik seperti
+    *Mean Absolute Error* (MAE) dan *Root Mean Square Error* (RMSE)
+    untuk mengetahui tingkat keakuratannya dalam melakukan prediksi.
+
+5)  **Pembuatan Dashboard\
+    ** Hasil prediksi kemudian ditampilkan dalam bentuk dashboard
+    berbasis web menggunakan framework Laravel sebagai media visualisasi
+    hasil penelitian.
+
+6)  **Analisis dan Kesimpulan\
+    ** Tahap terakhir dilakukan analisis terhadap hasil prediksi untuk
+    memahami sejauh mana model dapat mengenali pola okupansi, serta
+    menyusun kesimpulan dan saran untuk pengembangan lebih lanjut.
+
+## Sistematika Penulisan
+
+Laporan proyek akhir ini disusun dengan sistematika sebagai berikut:
+
+**BAB I PENDAHULUAN**
+
+  Berisi latar belakang, rumusan masalah, batasan masalah, tujuan
+penelitian, manfaat penelitian, metodologi penelitian, dan sistematika
+penulisan.
+
+**BAB II TINJAUAN PUSTAKA**
+
+  Membahas teori-teori yang mendukung penelitian seperti konsep data
+*time series*, algoritma *Long Short-Term Memory* (LSTM), serta
+penelitian terdahulu yang berkaitan dengan prediksi tingkat hunian
+hotel.
+
+**BAB III PERANCANGAN**
+
+   Menjelaskan proses analisis kebutuhan, rancangan model prediksi, alur
+sistem, serta rancangan antarmuka dashboard untuk penyajian hasil
+prediksi.
+
+**BAB IV PENGUJIAN DAN ANALISIS**
+
+  Menguraikan proses implementasi model, hasil pelatihan dan pengujian,
+serta pembahasan terhadap hasil prediksi yang diperoleh.
+
+**BAB V PENUTUP**
+
+ Menyajikan kesimpulan dari penelitian dan saran yang dapat dijadikan
+acuan untuk pengembangan sistem di masa mendatang.
+
+# II. TINJAUAN PUSTAKA
+
+## Penelitian Terdahulu
+
+Penelitian terdahulu menjadi landasan penting untuk memahami bagaimana
+berbagai metode digunakan dalam memprediksi tingkat okupansi hotel dan
+permintaan wisata. Melalui penelitian-penelitian sebelumnya, dapat
+diketahui perkembangan teknologi dan algoritma yang digunakan, mulai
+dari model statistik seperti ARIMA hingga metode *deep learning* seperti
+LSTM dan Transformer. Dengan meninjau penelitian-penelitian tersebut,
+peneliti dapat memahami kelebihan dan kekurangannya, sekaligus menemukan
+ruang pengembangan untuk penelitian yang sedang dilakukan. Berikut ini
+merupakan rangkuman dari dua belas jurnal yang relevan dengan topik ini.
+
+Menurut Salamanis et al. (2022), penelitian mereka berfokus pada
+prediksi permintaan wisata jangka panjang menggunakan algoritma *Long
+Short-Term Memory* (LSTM). Hasilnya menunjukkan bahwa model LSTM mampu
+mengenali pola musiman dengan baik dan menghasilkan prediksi jangka
+panjang yang akurat. Namun, penelitian ini masih terbatas pada data
+agregat destinasi wisata, bukan data individual dari hotel tertentu.
+
+Chang et al. (2021) mengombinasikan model LSTM dengan *sentiment
+analysis* dari ulasan pelanggan daring untuk memprediksi tingkat
+okupansi hotel. Pendekatan ini mengintegrasikan data okupansi historis
+dengan teks ulasan pelanggan dan terbukti meningkatkan akurasi prediksi.
+Meski demikian, implementasinya cukup kompleks karena memerlukan proses
+*data crawling* dan *text preprocessing* berbasis NLP, serta belum
+dikembangkan menjadi sistem *dashboard* yang dapat digunakan secara
+langsung.
+
+Penelitian Singgalen (2025) berfokus pada analisis tren industri
+perhotelan di Indonesia dengan memanfaatkan pendekatan *big data
+analytics*. Studi ini memberikan wawasan umum mengenai pola okupansi dan
+tren industri perhotelan nasional. Namun, penelitian tersebut masih
+bersifat deskriptif dan tidak melakukan peramalan secara spesifik
+menggunakan model deep learning seperti LSTM.
+
+Sementara itu, Kozlovskis et al. (2023) melakukan perbandingan antara
+beberapa algoritma *machine learning* seperti *Random Forest* (RF),
+XGBoost, dan *Support Vector Machine* (SVM) dalam memprediksi tingkat
+okupansi hotel. Hasilnya menunjukkan bahwa XGBoost menghasilkan
+kesalahan prediksi terendah dibandingkan algoritma lainnya. Akan tetapi,
+penelitian ini belum mengeksplorasi model berbasis *deep learning* yang
+lebih efektif dalam mengenali pola temporal jangka panjang.
+
+Dalam penelitian Lee et al. (2020), model *Artificial Neural Network*
+(ANN) dibandingkan dengan ARIMA dan regresi linear untuk memprediksi
+okupansi hotel jangka pendek. Hasil penelitian menunjukkan bahwa ANN
+mampu menangani data non-linear dengan lebih baik daripada ARIMA. Namun,
+arsitektur yang digunakan masih sederhana dan belum memanfaatkan
+kemampuan memori jangka panjang seperti yang dimiliki LSTM.
+
+Yi et al. (2025) memperkenalkan model Transformer dengan *attention
+mechanism* untuk prediksi permintaan wisata. Model ini menunjukkan
+akurasi yang lebih tinggi daripada LSTM pada dataset besar dan kompleks.
+Walaupun begitu, tingkat kebutuhan komputasi model Transformer jauh
+lebih tinggi sehingga kurang efisien untuk diterapkan pada hotel
+berskala kecil hingga menengah.
+
+Selanjutnya, Elsworth dan Güttel (2020) mengembangkan pendekatan
+*Symbolic* LSTM yang bertujuan meningkatkan interpretabilitas model
+*deep learning*. Model ini mampu menjelaskan hubungan antarvariabel
+dengan lebih transparan, tetapi masih bersifat teoritis dan belum banyak
+diaplikasikan pada kasus nyata seperti prediksi okupansi hotel.
+
+Penelitian oleh Manullang et al. (2020) menggunakan LSTM untuk
+memprediksi jumlah pengunjung wisata di Taman Nasional Gunung Merbabu,
+Indonesia. Hasil penelitian ini cukup relevan karena konteksnya di
+Indonesia dan menggunakan pendekatan LSTM, namun fokusnya lebih kepada
+jumlah wisatawan, bukan tingkat okupansi hotel.
+
+Dalam penelitian Alfarisi et al. (2025), model hibrida ARIMA-LSTM
+diusulkan untuk memanfaatkan kekuatan analisis linear ARIMA dan
+kemampuan non-linear LSTM secara bersamaan. Hasil penelitian menunjukkan
+peningkatan akurasi dengan nilai kesalahan (RMSE dan MAE) yang lebih
+rendah dibandingkan model tunggal. Namun, model ini membutuhkan waktu
+pelatihan dan sumber daya komputasi yang lebih besar.
+
+Ampountolas (2021) membandingkan model SARIMAX, GARCH, dan *Neural
+Network* untuk memprediksi permintaan harian hotel di kawasan Eropa.
+Hasilnya menunjukkan bahwa *Neural Network* memiliki performa lebih baik
+dibandingkan model statistik klasik. Meski demikian, penelitian ini
+dilakukan dengan konteks geografis dan karakteristik data yang berbeda
+dari kondisi di Indonesia.
+
+Penelitian Dowlut dan Gobin-Rahimbux (2023) menerapkan model *deep
+learning* untuk memprediksi permintaan *resort* hotel berdasarkan data
+pemesanan harian. Hasil penelitian menunjukkan efektivitas model dalam
+membantu manajemen pendapatan hotel mewah. Akan tetapi, penelitian ini
+masih berfokus pada resort hotel dan belum mengembangkan sistem prediksi
+berbasis web.
+
+Terakhir, Helya et al. (2024) menggunakan *Genetic Algorithm* (GA) untuk
+mengoptimalkan parameter *Neural Network* dalam memprediksi jumlah
+wisatawan berdasarkan data okupansi hotel. Meskipun metode ini
+meningkatkan akurasi, kompleksitasnya cukup tinggi dan belum
+memanfaatkan pendekatan LSTM yang lebih populer untuk data sekuensial.
+
+  ------------------------------------------------------------------------------------
+  **Peneliti**     **Tujuan**          **Model**     **Hasil**       **GAP**
+  ---------------- ------------------- ------------- --------------- -----------------
+  **Salamanis et   Memprediksi         LSTM          LSTM mampu      Data hanya pada
+  al. (2022)**     permintaan wisata                 mengenali pola  level destinasi
+                   jangka panjang                    musiman dan     wisata gabungan,
+                   berdasarkan pola                  menghasilkan    belum pada
+                   musiman.                          prediksi jangka tingkat hotel
+                                                     panjang yang    individu.
+                                                     akurat.         
+
+  **Chang et al.   Mengombinasikan     LSTM +        Model gabungan  Proses data
+  (2021)**         data okupansi dan   *Sentiment    meningkatkan    kompleks dan
+                   ulasan pelanggan    Analysis*     akurasi         belum
+                   daring untuk                      prediksi.       dikembangkan ke
+                   prediksi tingkat                                  dalam sistem
+                   hunian hotel.                                     dashboard.
+
+  **Singgalen      Menganalisis tren   *Big Data     Memberikan      Hanya bersifat
+  (2025)**         industri perhotelan Analytics*    gambaran pola   deskriptif, tanpa
+                   di Indonesia                      okupansi hotel  model prediksi
+                   menggunakan *big                  di Indonesia.   kuantitatif.
+                   data analytics*.                                  
+
+  **Kozlovskis et  Membandingkan       RF, XGBoost,  XGBoost         Belum
+  al. (2023)**     beberapa algoritma  SVM           memiliki        mengeksplorasi
+                   *machine learning*                kesalahan       *deep learning*
+                   untuk prediksi                    prediksi        untuk pola
+                   okupansi hotel.                   terendah.       temporal jangka
+                                                                     panjang.
+
+  **Lee et al.     Membandingkan model ANN, ARIMA,   ANN lebih baik  Arsitektur
+  (2020)**         ANN dengan ARIMA    Linear        menangani data  sederhana, belum
+                   dan regresi linear  Regression    non-linear      memiliki
+                   untuk prediksi                    dibanding       kemampuan memori
+                   okupansi jangka                   ARIMA.          jangka panjang
+                   pendek.                                           seperti LSTM.
+
+  **Yi et al.      Meningkatkan        Transformer   Transformer     Butuh komputasi
+  (2025)**         akurasi prediksi                  lebih akurat    tinggi, kurang
+                   wisata menggunakan                dari LSTM pada  sesuai untuk
+                   model Transformer                 dataset besar.  hotel
+                   dengan *attention                                 kecil-menengah.
+                   mechanism*.                                       
+
+  **Elsworth &     Meningkatkan        Symbolic LSTM Menjelaskan     Masih teoritis
+  Güttel (2020)**  interpretabilitas                 hubungan        dan belum
+                   model *deep                       antarvariabel   diterapkan pada
+                   learning* untuk                   dengan lebih    konteks nyata.
+                   prediksi deret                    transparan.     
+                   waktu.                                            
+
+  **Manullang et   Memprediksi jumlah  LSTM          Mampu mengenali Fokus pada jumlah
+  al. (2020)**     pengunjung wisata                 pola kunjungan  wisatawan, bukan
+                   di Taman Nasional                 wisata di       tingkat okupansi
+                   Gunung Merbabu.                   Indonesia.      hotel.
+
+  **Alfarisi et    Menggabungkan ARIMA ARIMA-LSTM    Model hibrida   Model kompleks
+  al. (2025)**     dan LSTM untuk                    menurunkan      dan butuh waktu
+                   meningkatkan                      nilai RMSE dan  pelatihan lebih
+                   akurasi peramalan.                MAE.            lama.
+
+  **Ampountolas    Memprediksi         SARIMAX,      NN menunjukkan  Data Eropa, tidak
+  (2021)**         permintaan harian   GARCH, NN     performa lebih  relevan langsung
+                   hotel di Eropa                    baik dari model dengan konteks
+                   menggunakan model                 klasik.         Indonesia.
+                   statistik dan                                     
+                   neural network.                                   
+
+  **Dowlut &       Memprediksi         Deep Learning Model efektif   Fokus pada hotel
+  Gobin-Rahimbux   permintaan resort                 untuk membantu  mewah, belum
+  (2023)**         hotel berbasis data               manajemen       dikembangkan
+                   pemesanan harian.                 pendapatan      sistem prediksi
+                                                     hotel mewah.    berbasis web.
+
+  **Helya et al.   Mengoptimalkan      GA + NN       Meningkatkan    Kompleksitas
+  (2024)**         parameter NN untuk                akurasi         tinggi, belum
+                   prediksi wisatawan                prediksi        memanfaatkan LSTM
+                   berdasarkan data                  melalui         untuk data
+                   okupansi hotel.                   optimasi        sekuensial.
+                                                     parameter.      
+  ------------------------------------------------------------------------------------
+
+Dari berbagai penelitian di atas, terlihat bahwa sebagian besar
+penelitian berfokus pada penerapan *deep learning* seperti LSTM untuk
+memprediksi permintaan wisata dan tingkat okupansi hotel (Salamanis et
+al., 2022; Chang et al., 2021; Yi et al., 2025). Beberapa penelitian
+juga mencoba model hibrida seperti ARIMA-LSTM (Alfarisi et al., 2025)
+untuk menggabungkan kekuatan pola linear dan non-linear, namun model ini
+cenderung kompleks dan memerlukan waktu pelatihan lebih lama.
+
+Selain itu, ada pula penelitian yang memperkaya model dengan data
+tambahan seperti ulasan pelanggan daring (Chang et al., 2021) atau
+menggunakan sumber data besar (Singgalen, 2025). Namun, sebagian besar
+penelitian tersebut belum mengarah pada penerapan praktis di level hotel
+individu, khususnya di Indonesia.
+
+Berbeda dengan penelitian-penelitian sebelumnya, penelitian ini akan
+menggunakan algoritma LSTM murni untuk memprediksi tingkat okupansi
+bulanan (*monthly forecasting*) pada Dharma Utama Hotel, menggunakan
+data historis tahun 2021--2025. Hasil prediksi kemudian akan
+diimplementasikan ke dalam *dashboard* berbasis web menggunakan
+framework Laravel, sehingga dapat dimanfaatkan langsung oleh pihak
+manajemen hotel. Pendekatan ini diharapkan menghasilkan sistem yang
+dapat memprediksi tingkat okupansi dan sesuai dengan kebutuhan hotel
+skala kecil hingga menengah di Indonesia.
+
+## Landasan Teori
+
+### Konsep Okupansi Hotel
+
+![A number of rooms and a number of rooms AI-generated content may be
+incorrect.](media/image2.png){width="5.74375in" height="1.6625in"}
+
+*Gambar 2.1: Formula Perhitungan Okupansi Hotel*\
+*(Sumber: Ivanov, 2014)*
+
+Okupansi hotel merupakan salah satu indikator kinerja utama dalam
+industri perhotelan yang mengukur seberapa efektif hotel memanfaatkan
+kapasitas fisiknya. Ivanov (2014) menjelaskan bahwa tingkat okupansi
+(*occupancy rate*) mengukur utilisasi kapasitas fisik hotel dan dapat
+dihitung dengan dua pendekatan berbeda, yaitu berdasarkan *overnights*
+(jumlah malam menginap) atau *roomnights* (jumlah kamar yang terjual).
+Metode pertama menghitung okupansi berdasarkan jumlah malam menginap
+dibagi dengan jumlah tempat tidur yang tersedia untuk dijual, kemudian
+dikalikan 100 untuk mendapatkan persentase. Metode kedua menghitung
+okupansi berdasarkan jumlah kamar yang terjual (*roomnights*) dibagi
+dengan jumlah kamar yang tersedia untuk dijual, kemudian dikalikan 100.
+Kedua metode perhitungan ini dapat menghasilkan nilai yang berbeda
+karena perbedaan jumlah tempat tidur di setiap kamar, variasi tipe kamar
+yang tersedia, permintaan yang tidak merata antar tipe kamar, serta
+kemungkinan penambahan tempat tidur ekstra atau penggunaan kamar di
+bawah kapasitas maksimal (Ivanov, 2014).
+
+Tingkat okupansi hotel tidak bersifat konstan dan dipengaruhi oleh
+berbagai faktor. Ivanov (2014) mengidentifikasi beberapa faktor utama
+yang mempengaruhi okupansi hotel, yaitu hari dalam seminggu (*day of the
+week*) di mana hotel bisnis cenderung memiliki okupansi lebih tinggi
+pada hari kerja sedangkan hotel leisure mengalami peningkatan di akhir
+pekan, periode dalam tahun (*period of the year*) yang mencerminkan
+faktor musiman seperti okupansi tinggi di musim panas untuk hotel pantai
+atau dua puncak okupansi di musim dingin dan panas untuk hotel
+pegunungan, segmen pasar (*market segments*) yang berbeda seperti
+wisatawan bisnis yang memilih kamar single sementara keluarga cenderung
+memesan kamar lebih besar, event khusus (*special events*) seperti
+pameran, konferensi, konser, atau festival yang dapat meningkatkan
+permintaan akomodasi secara signifikan, serta faktor lainnya seperti
+aksesibilitas destinasi, tingkat kompetisi, strategi marketing hotel,
+dan kualitas produk layanan. Pemahaman terhadap konsep okupansi dan
+faktor-faktor yang mempengaruhinya sangat penting dalam konteks
+manajemen hotel, karena prediksi okupansi yang akurat memungkinkan
+manajemen untuk melakukan perencanaan operasional yang lebih baik,
+optimalisasi strategi penetapan harga (*pricing*), dan pengelolaan
+sumber daya yang lebih efisien (Ivanov, 2014).
+
+### Data dan Pengolahan Data
+
+#### Data *Time Series*
+
+![A screenshot of a graph AI-generated content may be
+incorrect.](media/image3.png){width="5.74375in" height="3.89375in"}
+
+*Gambar 2.1: Komponen-komponen dalam Data Time Series*\
+*(Sumber: MathWorks, 2024)*
+
+Time series didefinisikan sebagai urutan observasi yang diambil secara
+berurutan dalam waktu. Box et al. (2016) menjelaskan bahwa fitur
+intrinsik dari time series adalah adanya dependensi atau ketergantungan
+antar observasi yang berdekatan, di mana sifat dependensi ini memiliki
+kepentingan praktis yang signifikan dalam analisis data. Data time
+series terdiri dari empat komponen utama yaitu trend yang menunjukkan
+arah keseluruhan data sepanjang waktu, seasonality yang merupakan pola
+berulang pada periode waktu yang tetap, cyclic variations yang merupakan
+pola berulang non-musiman dalam rentang waktu beberapa tahun, dan
+irregular variations yang merupakan fluktuasi acak yang tidak dapat
+diprediksi. Time series analysis berkaitan dengan teknik-teknik untuk
+menganalisis dependensi temporal dalam data, yang memerlukan
+pengembangan model stokastik dan dinamis untuk prediksi nilai masa depan
+berdasarkan pola historis (Box et al., 2016; MathWorks, 2024).
+
+#### ETL (Extract, Transform, Load)
+
+![A diagram of a process AI-generated content may be
+incorrect.](media/image4.png){width="5.74375in"
+height="1.9111111111111112in"}
+
+*Gambar 2.2: Four Staging Steps dalam Proses ETL Data Warehouse*\
+*(Sumber: Kimball & Caserta, 2004)*
+
+Extract-Transform-Load (ETL) adalah fondasi dari sistem data warehouse
+yang berfungsi untuk mengekstrak data dari sistem sumber, menegakkan
+standar kualitas dan konsistensi data, menyesuaikan data dari berbagai
+sumber agar dapat digunakan bersama, dan menyampaikan data dalam format
+yang siap untuk dianalisis. Kimball & Caserta (2004) menjelaskan bahwa
+sistem ETL memberikan nilai tambah yang signifikan pada data dengan
+menghilangkan kesalahan dan memperbaiki data yang hilang, menyediakan
+ukuran kepercayaan terhadap data yang terdokumentasi, menangkap aliran
+data transaksional, menyesuaikan data dari berbagai sumber agar dapat
+digunakan bersama, dan menyusun data agar dapat digunakan oleh end-user
+tools.
+
+Proses ETL terdiri dari empat tahapan utama sebagaimana ditunjukkan pada
+Gambar 2.2, yaitu extract untuk pengambilan data dari berbagai sumber
+sistem, clean untuk pembersihan dan peningkatan kualitas data dengan
+menghilangkan inkonsistensi, conform untuk memastikan data dari berbagai
+sumber dapat digunakan bersama dengan konsisten, dan deliver untuk
+pengiriman data dalam format yang siap digunakan untuk analisis. Setiap
+tahapan memiliki data staging area tersendiri yang berfungsi sebagai
+area penyimpanan sementara untuk transformasi data. Kimball & Caserta
+(2004) menekankan bahwa meskipun ETL merupakan aktivitas back room yang
+tidak terlihat oleh end user, proses ini mengkonsumsi sekitar 70 persen
+dari sumber daya yang dibutuhkan untuk implementasi dan maintenance data
+warehouse.
+
+#### Normalisasi Data
+
+Normalisasi data merupakan salah satu transformasi penting yang perlu
+diterapkan pada data, karena algoritma machine learning umumnya tidak
+bekerja dengan baik ketika atribut numerik memiliki skala yang sangat
+berbeda. Géron (2019) menjelaskan bahwa terdapat dua cara umum untuk
+membuat semua atribut memiliki skala yang sama, yaitu min-max scaling
+dan standardization. Min-max scaling adalah metode yang paling
+sederhana, di mana nilai-nilai digeser dan di-rescale sehingga berada
+dalam rentang 0 hingga 1, dengan cara mengurangkan nilai minimum dan
+membaginya dengan selisih antara nilai maksimum dan minimum.
+Standardization berbeda dengan min-max scaling, di mana nilai rata-rata
+(*mean*) dikurangkan terlebih dahulu sehingga nilai yang telah
+distandarisasi memiliki mean nol, kemudian dibagi dengan standar deviasi
+sehingga distribusi yang dihasilkan memiliki unit variance. Berbeda
+dengan min-max scaling yang membatasi nilai pada rentang tertentu,
+standardization tidak membatasi nilai pada rentang spesifik, namun
+standardization jauh lebih sedikit terpengaruh oleh outlier. Géron
+(2019) menekankan bahwa neural networks sering mengharapkan nilai input
+dalam rentang 0 hingga 1, sehingga pemilihan metode normalisasi
+bergantung pada karakteristik data dan algoritma yang digunakan.
+
+### Konsep Machine Learning dan Deep Learning
+
+#### *Machine Learning*
+
+Machine Learning didefinisikan sebagai ilmu (dan seni) dalam memprogram
+komputer agar dapat belajar dari data (Géron, 2019). Samuel (1959)
+memberikan definisi yang lebih umum bahwa Machine Learning adalah bidang
+studi yang memberikan kemampuan kepada komputer untuk belajar tanpa
+diprogram secara eksplisit. Mitchell (1997) memberikan definisi yang
+lebih berorientasi pada rekayasa, yaitu sebuah program komputer
+dikatakan belajar dari pengalaman E dengan respect terhadap suatu tugas
+T dan ukuran kinerja P, jika kinerjanya pada T yang diukur oleh P
+meningkat dengan pengalaman E. Dalam konteks ini, pengalaman E merujuk
+pada data pelatihan (*training data*) yang digunakan oleh sistem untuk
+belajar, tugas T adalah tugas yang harus diselesaikan oleh sistem
+seperti klasifikasi atau prediksi, dan ukuran kinerja P adalah metrik
+yang digunakan untuk mengevaluasi hasil seperti akurasi atau presisi.
+Contoh yang diberikan oleh sistem untuk belajar disebut sebagai
+*training set*, di mana setiap contoh pelatihan disebut sebagai
+*training instance* atau *sample*. Géron (2019) menekankan bahwa Machine
+Learning berbeda dengan hanya mengunduh atau menyimpan data, karena
+pembelajaran terjadi ketika sistem dapat meningkatkan kinerjanya pada
+suatu tugas berdasarkan pengalaman yang diperoleh dari data tersebut.
+
+#### *Deep Learning*
+
+![A diagram of a layer AI-generated content may be
+incorrect.](media/image5.png){width="5.74375in"
+height="3.1381944444444443in"}
+
+*Gambar 2.3: Transformasi Representasi Data pada Setiap Layer Deep
+Neural Network*\
+*(Sumber: Chollet, 2021)*
+
+Deep learning adalah subfield spesifik dari machine learning yang
+menekankan pada pembelajaran representasi data secara bertingkat
+(*layered representations*) dengan tingkat kompleksitas yang semakin
+meningkat (Chollet, 2021). Istilah \"deep\" dalam deep learning bukan
+merujuk pada pemahaman yang lebih mendalam yang dicapai oleh pendekatan
+ini, melainkan mengacu pada ide pembelajaran representasi yang berurutan
+dan berlapis. Chollet (2021) menjelaskan bahwa jumlah layer yang
+berkontribusi pada model data disebut sebagai kedalaman (*depth*) dari
+model tersebut, dan deep learning modern sering melibatkan puluhan atau
+bahkan ratusan layer representasi berurutan yang semuanya dipelajari
+secara otomatis dari exposure terhadap training data. Representasi
+berlapis ini dipelajari melalui model yang disebut neural networks, yang
+terstruktur dalam layer literal yang ditumpuk satu di atas yang lain, di
+mana setiap layer mentransformasi data input menjadi representasi yang
+semakin berbeda dari data asli namun semakin informatif terhadap hasil
+akhir. Proses ini dapat dianggap sebagai multistage information
+distillation, di mana informasi melewati filter berturut-turut dan
+keluar semakin murni atau semakin berguna terkait dengan tugas tertentu
+(Chollet, 2021). Berbeda dengan pendekatan machine learning lainnya yang
+cenderung fokus pada pembelajaran hanya satu atau dua layer representasi
+data, deep learning dengan multiple layers ini memungkinkan model untuk
+menangkap pola yang lebih kompleks dan abstrak dalam data.
+
+### Algoritma *Long Short-Term Memory (*LSTM)
+
+![A diagram of a mathematical equation AI-generated content may be
+incorrect.](media/image6.png){width="5.74375in"
+height="2.513888888888889in"}
+
+*Gambar 2.4: Arsitektur Memory Cell LSTM dengan Gate Units (Sumber:
+Hochreiter & Schmidhuber, 1997)*
+
+Neural networks konvensional seperti feedforward networks dan
+convolutional networks tidak memiliki memori, di mana setiap input
+diproses secara independen tanpa adanya state yang disimpan di antara
+input (Chollet, 2021). Recurrent Neural Network (RNN) mengatasi
+keterbatasan ini dengan memproses urutan data secara iteratif melalui
+elemen-elemen sequence sambil mempertahankan state yang berisi informasi
+relatif terhadap apa yang telah dilihat sebelumnya, sehingga RNN dapat
+menangani dependensi temporal dalam data. Namun, pembelajaran untuk
+menyimpan informasi dalam jangka waktu yang panjang melalui recurrent
+backpropagation membutuhkan waktu yang sangat lama, sebagian besar
+disebabkan oleh aliran error balik yang tidak memadai dan mengalami
+decay, sebuah fenomena yang dikenal sebagai vanishing gradient problem
+(Hochreiter & Schmidhuber, 1997).
+
+Long Short-Term Memory (LSTM) diperkenalkan oleh Hochreiter &
+Schmidhuber (1997) sebagai metode berbasis gradient yang efisien untuk
+mengatasi masalah vanishing gradient pada RNN konvensional. LSTM dapat
+mempelajari time lags minimal yang melebihi 1000 discrete time steps
+dengan cara memaksakan constant error flow melalui \"constant error
+carousels\" dalam unit-unit khusus. Arsitektur LSTM menggunakan
+multiplicative gate units yang belajar untuk membuka dan menutup akses
+ke constant error flow, memungkinkan network untuk mempertahankan
+informasi dalam jangka panjang. Gate mechanisms pada LSTM terdiri dari
+forget gate yang menentukan informasi mana yang harus dibuang dari cell
+state, input gate yang menentukan informasi baru mana yang akan
+disimpan, dan output gate yang menentukan output berdasarkan cell state.
+Struktur ini memungkinkan LSTM untuk menangkap dependensi jangka panjang
+dalam data sequential dengan lebih efektif dibandingkan RNN
+konvensional, menjadikannya sangat cocok untuk aplikasi time series
+forecasting seperti prediksi okupansi hotel yang memiliki pola temporal
+dan seasonal yang kompleks (Hochreiter & Schmidhuber, 1997).
+
+### Bahasa Pemograman Python 
+
+Python adalah bahasa pemrograman interpreted yang pertama kali muncul
+pada tahun 1991 dan telah menjadi salah satu bahasa pemrograman
+interpreted yang paling populer di dunia (McKinney, 2022). Python
+interpreter menjalankan program dengan mengeksekusi satu statement pada
+satu waktu, yang memberikan fleksibilitas dalam pengembangan dan
+debugging kode. McKinney (2022) menjelaskan bahwa karena berbagai alasan
+historis dan kultural, Python telah mengembangkan komunitas scientific
+computing dan data analysis yang besar dan aktif, di mana dalam 20 tahun
+terakhir Python telah bertransformasi dari bahasa yang dianggap berisiko
+menjadi salah satu bahasa terpenting untuk data science, machine
+learning, dan pengembangan software secara umum baik di akademia maupun
+industri. Python menyediakan ekosistem library yang kaya untuk mendukung
+berbagai tahapan dalam proyek data science dan machine learning,
+termasuk NumPy untuk komputasi numerik, Pandas untuk manipulasi dan
+analisis data, Matplotlib dan Seaborn untuk visualisasi data, serta
+TensorFlow dan Keras untuk pengembangan model deep learning. Selain
+library-library tersebut, Python juga menyediakan IPython sebagai
+enhanced Python interpreter dan Jupyter notebooks sebagai web-based code
+notebooks yang memungkinkan eksplorasi data dan pengembangan model
+secara interaktif, menjadikan Python sebagai pilihan yang ideal untuk
+penelitian dan pengembangan dalam bidang machine learning dan time
+series forecasting (McKinney, 2022).
+
+### Evaluasi Model
+
+Evaluasi model merupakan tahapan penting untuk mengukur akurasi forecast
+dan menentukan seberapa baik model melakukan prediksi pada data baru
+yang tidak digunakan saat fitting model (Hyndman & Athanasopoulos,
+2021). Forecast error didefinisikan sebagai perbedaan antara nilai
+observasi dan nilai prediksinya, yang dapat dirangkum dalam berbagai
+cara untuk mengukur akurasi forecast. Hyndman & Athanasopoulos (2021)
+menjelaskan bahwa terdapat beberapa kategori metrik evaluasi, yaitu
+scale-dependent errors yang berada pada skala yang sama dengan data,
+percentage errors yang bersifat unit-free sehingga dapat digunakan untuk
+membandingkan performa forecast antar dataset yang berbeda, dan scaled
+errors yang menskalakan error berdasarkan training MAE dari metode
+forecast sederhana.
+
+Mean Absolute Error (MAE) dihitung sebagai rata-rata dari nilai absolut
+error dan merupakan metrik yang populer karena mudah dipahami dan
+dihitung, di mana metode forecast yang meminimalkan MAE akan
+menghasilkan prediksi median. Root Mean Squared Error (RMSE) dihitung
+sebagai akar kuadrat dari rata-rata error kuadrat, yang memberikan
+penalti lebih besar terhadap error yang besar, dan metode forecast yang
+meminimalkan RMSE akan menghasilkan prediksi mean. Mean Absolute
+Percentage Error (MAPE) dihitung sebagai rata-rata dari nilai absolut
+percentage error, dengan keuntungan bersifat unit-free sehingga sering
+digunakan untuk membandingkan performa forecast antar dataset yang
+berbeda. Hyndman & Athanasopoulos (2021) menekankan bahwa pemilihan
+metrik evaluasi yang tepat sangat penting dalam menentukan metode
+forecasting terbaik, di mana pada beberapa kasus, metrik yang berbeda
+dapat menghasilkan kesimpulan yang berbeda mengenai metode mana yang
+terbaik, namun umumnya semua metrik akan menunjuk pada metode yang sama
+sebagai yang paling akurat untuk dataset tertentu.
+
+### Implementasi Sistem Prediksi
+
+#### Framework Laravel
+
+> Penggunaan framework dalam pengembangan web application memberikan
+> manfaat berupa pre-packaged collection dari third-party components
+> yang terintegrasi dengan baik, di mana framework membuat keputusan
+> tidak hanya tentang komponen individual tetapi juga bagaimana
+> komponen-komponen tersebut harus bekerja bersama (Stauffer, 2019).
+> Laravel adalah PHP framework yang menggunakan arsitektur
+> Model-View-Controller (MVC) dan menyediakan struktur yang konsisten
+> untuk pengembangan aplikasi web, memastikan bahwa routing,
+> controllers, views, dan database access bekerja secara kohesif.
+> Stauffer (2019) menjelaskan bahwa Laravel dirancang dengan fokus utama
+> pada developer happiness dan developer speed, menyediakan syntax yang
+> clear dan simple serta tools yang membantu developer dengan cepat
+> memulai dan mengembangkan aplikasi tanpa mengorbankan code readability
+> dan comprehensibility.
+>
+> Framework ini menyediakan fitur-fitur seperti closure-based routing,
+> built-in ORM (Eloquent), command-line tools, dan helpers untuk forms,
+> validation, dan authentication yang memfasilitasi rapid application
+> development. Laravel menganut prinsip convention over configuration
+> yang mengurangi jumlah kode yang harus dipahami developer baru, karena
+> jika developer memahami cara routing bekerja di satu Laravel project,
+> mereka akan memahaminya di semua Laravel projects (Stauffer, 2019).
+
+#### Dashboard
+
+Few (2006) mendefinisikan dashboard sebagai tampilan visual dari
+informasi paling penting yang diperlukan untuk mencapai satu atau lebih
+tujuan, yang dikonsolidasikan dan disusun pada satu layar sehingga
+informasi dapat dipantau sekilas. Dashboard berfungsi sebagai media
+untuk menyajikan informasi kritis dalam format yang memungkinkan
+pengguna memahami kondisi atau status tertentu dengan cepat tanpa perlu
+menganalisis data secara mendalam.
+
+Prinsip utama dalam desain dashboard adalah pemanfaatan visual
+communication yang efektif. Few (2006) menekankan bahwa dashboard harus
+menggunakan tampilan visual yang sangat grafis karena presentasi grafis
+yang dirancang dengan ahli dapat mengomunikasikan informasi dengan
+efisiensi lebih besar dan makna yang lebih kaya dibandingkan teks saja.
+Kemampuan persepsi visual manusia untuk memproses informasi grafis
+secara cepat menjadikan dashboard sebagai alat yang powerful untuk
+monitoring dan pengambilan keputusan.
+
+Karakteristik penting dari dashboard yang efektif menurut Few (2006)
+adalah kemampuannya untuk memuat seluruh informasi dalam satu layar
+komputer tanpa perlu scrolling, sehingga semua informasi kritis tersedia
+dalam jangkauan mata pengguna dan dapat dilihat sekilas. Batasan satu
+layar ini bukan hanya preferensi estetika, melainkan prinsip ergonomis
+yang memastikan pengguna dapat dengan cepat menangkap keseluruhan
+situasi tanpa kehilangan konteks atau harus berpindah-pindah tampilan.
+Dashboard biasanya menampilkan informasi dalam bentuk ringkasan atau
+exceptions, di mana sistem hanya menyoroti poin-poin penting yang
+memerlukan perhatian atau tindakan dari pengguna.
+
+Few (2006) juga menjelaskan bahwa mekanisme tampilan pada dashboard
+harus kecil, ringkas, jelas, dan intuitif agar keseluruhan koleksi
+informasi dapat muat dalam ruang terbatas dari satu layar. Mekanisme ini
+dapat berupa berbagai bentuk visualisasi seperti grafik, tabel,
+indikator, atau gauge, yang dipilih berdasarkan jenis informasi dan
+tujuan komunikasi. Dashboard yang dirancang dengan baik memungkinkan
+pengguna untuk memantau Key Performance Indicators (KPI) secara
+real-time atau near real-time, mengidentifikasi tren, membandingkan
+metrik, dan mendeteksi anomali yang memerlukan investigasi lebih lanjut.
+Dengan demikian, dashboard berperan sebagai alat decision support yang
+mengubah data mentah menjadi insight yang actionable.
+
+I.  
+
+# Daftar Pustaka
+
+Alfarisi, W. W., Darmawan, G., & Tantular, B. (2025). *Improving the
+accuracy of room occupancy forecasts with hybrid models*. Jurnal Ilmu
+Pendidikan dan Pariwisata, 10(2), 55--67.
+https://ejournal.undiksha.ac.id/index.php/JIPP/article/view/89464/34086
+
+Ampountolas, A. (2021). *Modeling and forecasting daily hotel demand: A
+comparison based on SARIMAX, neural networks, and GARCH models*. Journal
+of Risk and Financial Management, 3(3), 37.
+https://www.mdpi.com/2571-9394/3/3/37
+
+Chang, Y.-M., Chen, C.-H., Lai, J.-P., Lin, Y.-L., & Pai, P.-F. (2021).
+*Forecasting hotel room occupancy using long short-term memory networks
+with sentiment analysis and scores of customer online reviews*. Applied
+Sciences, 11(21), 10291. https://doi.org/10.3390/app112110291
+
+Dowlut, N., & Gobin-Rahimbux, B. (2023). *Forecasting resort hotel
+tourism demand using deep learning techniques -- A systematic literature
+review*. Heliyon, 9(5), e18385.
+https://www.cell.com/heliyon/fulltext/S2405-8440(23)05593-7
+
+Elsworth, S., & Güttel, S. (2020). *Time series forecasting using LSTM
+networks: A symbolic approach*. arXiv. https://arxiv.org/abs/2003.05672
+
+Helya, H. N., Fithriyah, N., & Fatimatuzzahra. (2024). *Optimasi neural
+network menggunakan algoritma genetika untuk memprediksi jumlah
+wisatawan berdasarkan hunian hotel*. Journal of Multidisciplinary
+Innovation, 2(1), 25--34.
+https://journal.mudaberkarya.id/index.php/JoMI/article/view/114
+
+Kozlovskis, K., Liu, Y., Lace, N., & Meng, Y. (2023). *Application of
+machine learning algorithms to predict hotel occupancy*. Journal of
+Business Economics and Management, 24(3), 345--359.
+https://doi.org/10.3846/jbem.2023.19775
+
+Lee, M., Mu, X., & Zhang, Y. (2020). *A machine learning approach to
+improving forecasting accuracy of hotel demand: A comparative analysis
+of neural networks and traditional models*. Issues in Information
+Systems, 21(1), 12--21. https://iacis.org/iis/2020/1_iis_2020_12-21.pdf
+
+Manullang, J., Santoso, A. J., & Emanuel, A. W. R. (2020). *Prediksi
+kunjungan wisatawan Taman Nasional Gunung Merbabu dengan time series
+forecasting dan LSTM*. Universitas Atma Jaya Yogyakarta Repository.
+https://repository.uajy.ac.id/id/eprint/26642
+
+Salamanis, A., Xanthopoulou, G., Kehagias, D., & Tzovaras, D. (2022).
+*LSTM-based deep learning models for long-term tourism demand
+forecasting*. Electronics, 11(22), 3681.
+https://doi.org/10.3390/electronics11223681
+
+Singgalen, Y. A. (2025). *Big data in tourism and hospitality industry:
+Predictive analytics of hotel room trends*. International Journal of
+Tourism and Leisure, 5(1), 12--24.
+https://journal.lasigo.org/index.php/IJTL/article/view/474
+
+Yi, S., Chen, X., & Tang, C. (2025). *Time series transformer for
+tourism demand forecasting*. Scientific Reports, 15(1), 1432.
+https://www.nature.com/articles/s41598-025-15286-0
+
+Ivanov, S. (2014). *Hotel Revenue Management: From Theory to Practice*.
+Bulgaria: Zangador.Retrieved from
+<https://www.zangador.eu/docs/ivanov2014hotelrevenuemanagement-fromtheorytopracticevarnazangador_730.pdf>
+
+MathWorks. (2024). Time Series Analysis. Retrieved from
+<https://www.mathworks.com/discovery/time-series-analysis.html>
+
+Box, G. E. P., Jenkins, G. M., Reinsel, G. C., & Ljung, G. M. (2016).
+Time Series Analysis: Forecasting and Control (5th ed.). John Wiley &
+Sons, Inc.
+
+Kimball, R., & Caserta, J. (2004). The Data Warehouse ETL Toolkit:
+Practical Techniques for Extracting, Cleaning, Conforming, and
+Delivering Data. Wiley Publishing, Inc.
+
+Géron, A. (2019). Hands-On Machine Learning with Scikit-Learn, Keras,
+and TensorFlow: Concepts, Tools, and Techniques to Build Intelligent
+Systems (2nd ed.). O\'Reilly Media, Inc.
+
+Hochreiter, S., & Schmidhuber, J. (1997). Long Short-Term Memory. Neural
+Computation, 9(8), 1735-1780.
+
+Hyndman, R. J., & Athanasopoulos, G. (2021). Forecasting: Principles and
+Practice (3rd ed.). OTexts. Retrieved from <https://otexts.com/fpp3/>
+
+Stauffer, M. (2019). Laravel: Up & Running (2nd ed.). O\'Reilly Media,
+Inc.
+
+Few, S. (2006). Information Dashboard Design: The Effective Visual
+Communication of Data. O\'Reilly Media, Inc.
