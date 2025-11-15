@@ -277,13 +277,13 @@ $(document).ready(function() {
         "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
     $('#currentMonth').text(`${monthNames[now.getMonth()]} ${now.getFullYear()}`);
 
-    // Check ML service status
-    checkMLServiceStatus();
+    // Show demo mode status
+    showDemoModeStatus();
 
-    // Load metrics
+    // Load metrics with sample data
     loadMetrics();
 
-    // Load historical data
+    // Load historical data with sample data
     loadHistoricalData();
 
     // Handle prediction form submission
@@ -293,104 +293,34 @@ $(document).ready(function() {
     });
 });
 
-// Check if ML API service is running
-function checkMLServiceStatus() {
-    $.ajax({
-        url: '{{ route("api.health") }}',
-        method: 'GET',
-        success: function(response) {
-            if (response.success) {
-                $('#mlServiceStatus')
-                    .removeClass('alert-danger')
-                    .addClass('alert-success')
-                    .show();
-                $('#statusIcon').addClass('text-success');
-                $('#statusText').html('<strong>ML Service:</strong> Running and ready for predictions');
-            } else {
-                showMLServiceError();
-            }
-        },
-        error: function() {
-            showMLServiceError();
-        }
-    });
-}
-
-function showMLServiceError() {
+// Show demo mode status (frontend only)
+function showDemoModeStatus() {
     $('#mlServiceStatus')
-        .removeClass('alert-success')
-        .addClass('alert-danger')
+        .removeClass('alert-danger')
+        .addClass('alert-info')
         .show();
-    $('#statusIcon').addClass('text-danger');
-    $('#statusText').html('<strong>ML Service:</strong> Not reachable. Please start Flask API server.');
+    $('#statusIcon').addClass('text-info');
+    $('#statusText').html('<strong>Demo Mode:</strong> Dashboard menggunakan sample data untuk demonstrasi frontend');
 }
 
-// Load model performance metrics
+// Load model performance metrics (sample data)
 function loadMetrics() {
-    $.ajax({
-        url: '{{ route("api.metrics") }}',
-        method: 'GET',
-        success: function(response) {
-            if (response.success && response.metrics) {
-                const metrics = response.metrics;
-
-                // Update metrics cards
-                $('#metricAccuracy').text(formatPercent(metrics.overall_accuracy || 74.83));
-                $('#metricMAPE').text(formatPercent(metrics.overall_mape || 25.17));
-                $('#accuracyChange').text('+' + formatPercent(metrics.improvement || 17.61));
-
-                // Best room type
-                const roomMetrics = metrics.per_room || {};
-                let bestRoom = 'STD';
-                let bestAccuracy = 0;
-
-                Object.keys(roomMetrics).forEach(room => {
-                    const accuracy = 100 - roomMetrics[room].MAPE;
-                    if (accuracy > bestAccuracy) {
-                        bestAccuracy = accuracy;
-                        bestRoom = room;
-                    }
-                });
-
-                $('#bestRoomType').text(bestRoom);
-                $('#bestRoomAccuracy').text(formatPercent(bestAccuracy));
-            }
-        },
-        error: function(xhr, status, error) {
-            console.error('Failed to load metrics:', error);
-            // Use default values
-            $('#metricAccuracy').text('74.83%');
-            $('#metricMAPE').text('25.17%');
-            $('#accuracyChange').text('+17.61%');
-            $('#bestRoomType').text('STD');
-            $('#bestRoomAccuracy').text('80.82%');
-        }
-    });
+    // Use sample metrics data
+    $('#metricAccuracy').text('74.83%');
+    $('#metricMAPE').text('25.17%');
+    $('#accuracyChange').text('+17.61%');
+    $('#bestRoomType').text('STD');
+    $('#bestRoomAccuracy').text('80.82%');
 }
 
-// Load historical occupancy data
+// Load historical occupancy data (sample data)
 function loadHistoricalData() {
     showLoading('Loading historical data...');
 
-    $.ajax({
-        url: '{{ route("api.historical") }}',
-        method: 'GET',
-        success: function(response) {
-            hideLoading();
-            if (response.success && response.data) {
-                renderHistoricalChart(response.data);
-            } else {
-                showToast('Failed to load historical data', 'warning');
-            }
-        },
-        error: function(xhr, status, error) {
-            hideLoading();
-            console.error('Failed to load historical data:', error);
-            showToast('Error loading historical data. Using sample data.', 'warning');
-            // Load sample data
-            renderHistoricalChart(getSampleHistoricalData());
-        }
-    });
+    setTimeout(() => {
+        hideLoading();
+        renderHistoricalChart(getSampleHistoricalData());
+    }, 500);
 }
 
 // Render historical data chart
@@ -463,9 +393,9 @@ function renderHistoricalChart(data) {
     });
 }
 
-// Generate prediction
+// Generate prediction (sample data - frontend only)
 function generatePrediction() {
-    const monthsAhead = $('#monthsAhead').val();
+    const monthsAhead = parseInt($('#monthsAhead').val());
     const roomTypes = [];
 
     $('.room-type-check:checked').each(function() {
@@ -479,28 +409,52 @@ function generatePrediction() {
 
     showLoading(`Generating prediction for ${monthsAhead} month(s)...`);
 
-    $.ajax({
-        url: '{{ route("api.predict") }}',
-        method: 'POST',
-        data: {
-            months_ahead: monthsAhead,
-            room_types: roomTypes
-        },
-        success: function(response) {
-            hideLoading();
-            if (response.success && response.predictions) {
-                renderPredictionResults(response.predictions, monthsAhead);
-                showToast('Prediction generated successfully!', 'success');
-            } else {
-                showToast('Failed to generate prediction', 'error');
-            }
-        },
-        error: function(xhr, status, error) {
-            hideLoading();
-            console.error('Prediction failed:', error);
-            showToast('Error generating prediction: ' + (xhr.responseJSON?.message || error), 'error');
+    // Simulate API call delay
+    setTimeout(() => {
+        hideLoading();
+
+        // Generate sample predictions
+        const predictions = generateSamplePredictions(roomTypes, monthsAhead);
+
+        renderPredictionResults(predictions, monthsAhead);
+        showToast('Prediction generated successfully!', 'success');
+    }, 1500);
+}
+
+// Generate sample predictions based on room types and months
+function generateSamplePredictions(roomTypes, monthsAhead) {
+    const predictions = {};
+
+    // Base occupancy rates for each room type
+    const baseRates = {
+        'STD': 75,
+        'SPR': 68,
+        'FMY': 62,
+        'JS': 65
+    };
+
+    roomTypes.forEach(roomType => {
+        const baseRate = baseRates[roomType];
+        const values = [];
+
+        for (let i = 0; i < monthsAhead; i++) {
+            // Add some variation (+/- 10%)
+            const variation = (Math.random() - 0.5) * 20;
+            let value = baseRate + variation;
+
+            // Add seasonal trend (peak in middle months)
+            const seasonalBoost = Math.sin((i / monthsAhead) * Math.PI) * 8;
+            value += seasonalBoost;
+
+            // Keep within 40-95% range
+            value = Math.max(40, Math.min(95, value));
+            values.push(parseFloat(value.toFixed(2)));
         }
+
+        predictions[roomType] = values;
     });
+
+    return predictions;
 }
 
 // Render prediction results
@@ -610,17 +564,47 @@ function fillPredictionSummaryTable(predictions, labels) {
     }
 }
 
-// Get sample historical data (fallback)
+// Get sample historical data (2021-2025)
 function getSampleHistoricalData() {
-    const months = ['Jan 21', 'Feb 21', 'Mar 21', 'Apr 21', 'May 21', 'Jun 21',
-                    'Jul 21', 'Aug 21', 'Sep 21', 'Oct 21', 'Nov 21', 'Dec 21'];
+    const months = [
+        'Jan 21', 'Feb 21', 'Mar 21', 'Apr 21', 'May 21', 'Jun 21',
+        'Jul 21', 'Aug 21', 'Sep 21', 'Oct 21', 'Nov 21', 'Dec 21',
+        'Jan 22', 'Feb 22', 'Mar 22', 'Apr 22', 'May 22', 'Jun 22',
+        'Jul 22', 'Aug 22', 'Sep 22', 'Oct 22', 'Nov 22', 'Dec 22',
+        'Jan 23', 'Feb 23', 'Mar 23', 'Apr 23', 'May 23', 'Jun 23',
+        'Jul 23', 'Aug 23', 'Sep 23', 'Oct 23', 'Nov 23', 'Dec 23',
+        'Jan 24', 'Feb 24', 'Mar 24', 'Apr 24', 'May 24', 'Jun 24',
+        'Jul 24', 'Aug 24', 'Sep 24', 'Oct 24', 'Nov 24', 'Dec 24',
+        'Jan 25', 'Feb 25', 'Mar 25', 'Apr 25', 'May 25', 'Jun 25',
+        'Jul 25', 'Aug 25', 'Sep 25', 'Oct 25'
+    ];
+
+    // Generate realistic occupancy data with trends
+    const generateOccupancyData = (baseRate, variance) => {
+        const data = [];
+        for (let i = 0; i < months.length; i++) {
+            // Trend: gradually increasing over years
+            const yearTrend = (i / 12) * 2;
+
+            // Seasonal: peak in middle of year, low at start/end
+            const seasonal = Math.sin((i % 12) / 12 * 2 * Math.PI) * 8;
+
+            // Random variation
+            const random = (Math.random() - 0.5) * variance;
+
+            let value = baseRate + yearTrend + seasonal + random;
+            value = Math.max(40, Math.min(95, value));
+            data.push(parseFloat(value.toFixed(2)));
+        }
+        return data;
+    };
 
     return {
         labels: months,
-        STD: [45, 48, 52, 55, 58, 62, 65, 68, 60, 55, 50, 58],
-        SPR: [42, 45, 48, 52, 55, 58, 62, 65, 58, 52, 48, 55],
-        FMY: [35, 38, 42, 45, 48, 52, 55, 58, 52, 45, 40, 48],
-        JS: [38, 42, 45, 48, 52, 55, 58, 62, 55, 48, 45, 52]
+        STD: generateOccupancyData(72, 8),  // Standard: higher base rate
+        SPR: generateOccupancyData(65, 10), // Superior: medium rate
+        FMY: generateOccupancyData(58, 12), // Family: lower, more variance
+        JS: generateOccupancyData(62, 10)   // Junior Suite: medium-low
     };
 }
 </script>
