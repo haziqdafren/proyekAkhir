@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Background -->
+  <rect width="100" height="100" fill="#2E5266" rx="15"/>
+
+  <!-- Hotel Building -->
+  <rect x="20" y="35" width="60" height="50" fill="#FFFFFF" rx="2"/>
+
+  <!-- Windows (3x3 grid) -->
+  <rect x="28" y="42" width="8" height="8" fill="#6FAADB" rx="1"/>
+  <rect x="46" y="42" width="8" height="8" fill="#6FAADB" rx="1"/>
+  <rect x="64" y="42" width="8" height="8" fill="#6FAADB" rx="1"/>
+
+  <rect x="28" y="55" width="8" height="8" fill="#6FAADB" rx="1"/>
+  <rect x="46" y="55" width="8" height="8" fill="#6FAADB" rx="1"/>
+  <rect x="64" y="55" width="8" height="8" fill="#6FAADB" rx="1"/>
+
+  <rect x="28" y="68" width="8" height="8" fill="#6FAADB" rx="1"/>
+  <rect x="46" y="68" width="8" height="8" fill="#6FAADB" rx="1"/>
+  <rect x="64" y="68" width="8" height="8" fill="#6FAADB" rx="1"/>
+
+  <!-- Door -->
+  <rect x="44" y="78" width="12" height="7" fill="#2E5266" rx="1"/>
+
+  <!-- Roof triangle -->
+  <polygon points="50,20 15,35 85,35" fill="#D4AF37"/>
+
+  <!-- Small circle on top (like a hotel sign) -->
+  <circle cx="50" y="18" r="4" fill="#D4AF37"/>
+</svg>

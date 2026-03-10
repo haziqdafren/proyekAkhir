@@ -1,0 +1,404 @@
+<template>
+  <DashboardLayout>
+    <div class="p-6 space-y-6">
+      <!-- Welcome Banner with gradient -->
+      <div class="relative bg-gradient-to-br from-primary-600 via-primary-700 to-indigo-800 rounded-3xl shadow-2xl overflow-hidden">
+        <div class="absolute inset-0 bg-grid-white/[0.05] bg-[size:20px_20px]"></div>
+        <div class="absolute right-0 top-0 -mt-4 -mr-16 h-64 w-64 rounded-full bg-white/10 blur-3xl"></div>
+        <div class="absolute left-0 bottom-0 -mb-4 -ml-16 h-48 w-48 rounded-full bg-indigo-500/20 blur-2xl"></div>
+
+        <div class="relative px-8 py-10">
+          <div class="flex items-center justify-between">
+            <div>
+              <h1 class="text-3xl font-bold text-white mb-2">
+                Selamat Datang, {{ $page.props.auth.user.name }} 👋
+              </h1>
+              <p class="text-primary-100 text-lg">
+                Berikut ringkasan prediksi okupansi hotel untuk 30 hari ke depan
+              </p>
+            </div>
+            <div class="hidden lg:block">
+              <div class="bg-white/10 backdrop-blur-sm border border-white/20 rounded-2xl px-6 py-4">
+                <p class="text-xs text-primary-100 uppercase tracking-wide mb-1">Hari Ini</p>
+                <p class="text-2xl font-bold text-white">{{ currentDate }}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stats Cards -->
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <StatCard
+          title="Rata-rata Okupansi"
+          :value="stats.avgOccupancy"
+          format="percentage"
+          :trend="stats.occupancyTrend"
+          :progress="stats.avgOccupancy"
+          color="blue"
+          :icon="ChartBarIcon"
+          subtitle="Prediksi 30 hari ke depan"
+        />
+
+        <StatCard
+          title="Estimasi Pendapatan"
+          :value="stats.predictedRevenue"
+          format="currency"
+          :trend="stats.revenueTrend"
+          color="green"
+          :icon="CurrencyDollarIcon"
+          subtitle="30 hari ke depan"
+        />
+
+        <StatCard
+          title="Total Kamar"
+          :value="stats.totalRooms"
+          suffix="kamar"
+          color="purple"
+          :icon="HomeIcon"
+          subtitle="Dari semua tipe kamar"
+        />
+
+        <StatCard
+          title="Tingkat Kepercayaan"
+          :value="85.5"
+          format="percentage"
+          :progress="85.5"
+          color="indigo"
+          :icon="SparklesIcon"
+          subtitle="Model prediksi ML"
+        />
+      </div>
+
+      <!-- Main Charts -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Occupancy Trend Chart -->
+        <div class="lg:col-span-2 bg-white rounded-2xl shadow-lg border border-gray-100 p-6 hover:shadow-2xl transition-shadow duration-300">
+          <div class="flex items-center justify-between mb-6">
+            <div>
+              <h2 class="text-xl font-bold text-gray-900">Trend Okupansi</h2>
+              <p class="text-sm text-gray-500 mt-1">Data historis 30 hari vs Prediksi 30 hari ke depan</p>
+            </div>
+            <div class="flex items-center space-x-2">
+              <span class="flex items-center text-xs font-medium text-gray-600">
+                <span class="w-3 h-3 bg-blue-500 rounded-full mr-2"></span>
+                Historis
+              </span>
+              <span class="flex items-center text-xs font-medium text-gray-600">
+                <span class="w-3 h-3 bg-purple-500 rounded-full mr-2"></span>
+                Prediksi
+              </span>
+            </div>
+          </div>
+
+          <ApexChart
+            type="area"
+            :height="350"
+            :series="occupancyChartSeries"
+            :options="occupancyChartOptions"
+          />
+        </div>
+
+        <!-- Revenue Breakdown -->
+        <div class="bg-white rounded-2xl shadow-lg border border-gray-100 p-6 hover:shadow-2xl transition-shadow duration-300">
+          <div class="mb-6">
+            <h2 class="text-xl font-bold text-gray-900">Revenue Breakdown</h2>
+            <p class="text-sm text-gray-500 mt-1">Per tipe kamar</p>
+          </div>
+
+          <ApexChart
+            type="donut"
+            :height="300"
+            :series="revenueChartSeries"
+            :options="revenueChartOptions"
+          />
+        </div>
+      </div>
+
+      <!-- Room Breakdown Table -->
+      <div class="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden hover:shadow-2xl transition-shadow duration-300">
+        <div class="px-6 py-5 border-b border-gray-200">
+          <h2 class="text-xl font-bold text-gray-900">Breakdown Per Tipe Kamar</h2>
+          <p class="text-sm text-gray-500 mt-1">Prediksi okupansi untuk 30 hari ke depan</p>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+              <tr>
+                <th class="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Tipe Kamar</th>
+                <th class="px-6 py-4 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Kapasitas</th>
+                <th class="px-6 py-4 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Prediksi Terisi</th>
+                <th class="px-6 py-4 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Okupansi</th>
+                <th class="px-6 py-4 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Harga Dasar</th>
+                <th class="px-6 py-4 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Status</th>
+              </tr>
+            </thead>
+            <tbody class="bg-white divide-y divide-gray-200">
+              <tr
+                v-for="room in roomBreakdown"
+                :key="room.id"
+                class="hover:bg-gray-50 transition-colors duration-150"
+              >
+                <td class="px-6 py-4 whitespace-nowrap">
+                  <div class="flex items-center">
+                    <div class="flex-shrink-0 h-10 w-10 bg-gradient-to-br from-primary-500 to-primary-600 rounded-lg flex items-center justify-center">
+                      <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+                      </svg>
+                    </div>
+                    <div class="ml-4">
+                      <div class="text-sm font-semibold text-gray-900">{{ room.name }}</div>
+                    </div>
+                  </div>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-center">
+                  <span class="text-sm font-medium text-gray-900">{{ room.capacity }}</span>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-center">
+                  <span class="text-sm font-medium text-gray-900">{{ room.predicted_occupied }}</span>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-center">
+                  <div class="flex flex-col items-center">
+                    <span class="text-sm font-bold text-gray-900 mb-1">{{ room.occupancy_rate }}%</span>
+                    <div class="w-24 bg-gray-200 rounded-full h-2 overflow-hidden">
+                      <div
+                        class="h-full rounded-full transition-all duration-1000 ease-out"
+                        :class="{
+                          'bg-gradient-to-r from-green-500 to-green-600': room.status === 'high',
+                          'bg-gradient-to-r from-yellow-500 to-yellow-600': room.status === 'medium',
+                          'bg-gradient-to-r from-red-500 to-red-600': room.status === 'low',
+                        }"
+                        :style="{ width: room.occupancy_rate + '%' }"
+                      ></div>
+                    </div>
+                  </div>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-center">
+                  <span class="text-sm font-medium text-gray-900">{{ formatCurrency(room.base_price) }}</span>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-center">
+                  <span
+                    class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold"
+                    :class="{
+                      'bg-green-100 text-green-700': room.status === 'high',
+                      'bg-yellow-100 text-yellow-700': room.status === 'medium',
+                      'bg-red-100 text-red-700': room.status === 'low',
+                    }"
+                  >
+                    <span
+                      class="w-2 h-2 rounded-full mr-2"
+                      :class="{
+                        'bg-green-500': room.status === 'high',
+                        'bg-yellow-500': room.status === 'medium',
+                        'bg-red-500': room.status === 'low',
+                      }"
+                    ></span>
+                    {{ room.status === 'high' ? 'Tinggi' : room.status === 'medium' ? 'Sedang' : 'Rendah' }}
+                  </span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </DashboardLayout>
+</template>
+
+<script setup>
+import { computed } from 'vue';
+import DashboardLayout from '@/Layouts/DashboardLayout.vue';
+import StatCard from '@/Components/StatCard.vue';
+import ApexChart from '@/Components/ApexChart.vue';
+import {
+  ChartBarIcon,
+  CurrencyDollarIcon,
+  HomeIcon,
+  SparklesIcon,
+} from '@heroicons/vue/24/outline';
+
+const props = defineProps({
+  stats: Object,
+  chartData: Object,
+  roomBreakdown: Array,
+  recentPredictions: Object,
+});
+
+const currentDate = computed(() => {
+  return new Date().toLocaleDateString('id-ID', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
+});
+
+const formatCurrency = (value) => {
+  return new Intl.NumberFormat('id-ID', {
+    style: 'currency',
+    currency: 'IDR',
+    minimumFractionDigits: 0,
+  }).format(value);
+};
+
+// Occupancy Chart
+const occupancyChartSeries = computed(() => {
+  const historical = props.chartData.historical.map(item => ({
+    x: new Date(item.date).getTime(),
+    y: item.occupancy,
+  }));
+
+  const predicted = props.chartData.predicted.map(item => ({
+    x: new Date(item.date).getTime(),
+    y: item.occupancy,
+  }));
+
+  return [
+    {
+      name: 'Data Historis',
+      data: historical,
+    },
+    {
+      name: 'Prediksi',
+      data: predicted,
+    },
+  ];
+});
+
+const occupancyChartOptions = {
+  chart: {
+    type: 'area',
+    stacked: false,
+    zoom: {
+      type: 'x',
+      enabled: true,
+      autoScaleYaxis: true,
+    },
+  },
+  dataLabels: {
+    enabled: false,
+  },
+  markers: {
+    size: 0,
+  },
+  fill: {
+    type: 'gradient',
+    gradient: {
+      shadeIntensity: 1,
+      inverseColors: false,
+      opacityFrom: 0.5,
+      opacityTo: 0,
+      stops: [0, 90, 100],
+    },
+  },
+  colors: ['#3B82F6', '#A855F7'],
+  stroke: {
+    curve: 'smooth',
+    width: 3,
+  },
+  xaxis: {
+    type: 'datetime',
+    labels: {
+      datetimeFormatter: {
+        year: 'yyyy',
+        month: 'MMM',
+        day: 'dd MMM',
+      },
+    },
+  },
+  yaxis: {
+    title: {
+      text: 'Okupansi (%)',
+    },
+    min: 0,
+    max: 100,
+  },
+  tooltip: {
+    shared: true,
+    x: {
+      format: 'dd MMM yyyy',
+    },
+    y: {
+      formatter: function (val) {
+        return val.toFixed(1) + '%';
+      },
+    },
+  },
+  legend: {
+    position: 'top',
+    horizontalAlign: 'right',
+  },
+  annotations: {
+    xaxis: [
+      {
+        x: new Date().getTime(),
+        borderColor: '#999',
+        strokeDashArray: 5,
+        label: {
+          text: 'Hari Ini',
+          style: {
+            color: '#fff',
+            background: '#775DD0',
+          },
+        },
+      },
+    ],
+  },
+};
+
+// Revenue Chart
+const revenueChartSeries = computed(() => {
+  return props.roomBreakdown.map(room => {
+    return Math.round((room.predicted_occupied * room.base_price * 30));
+  });
+});
+
+const revenueChartOptions = {
+  chart: {
+    type: 'donut',
+  },
+  labels: props.roomBreakdown.map(room => room.name),
+  colors: ['#3B82F6', '#10B981', '#A855F7', '#F59E0B'],
+  legend: {
+    position: 'bottom',
+  },
+  plotOptions: {
+    pie: {
+      donut: {
+        size: '70%',
+        labels: {
+          show: true,
+          total: {
+            show: true,
+            label: 'Total Revenue',
+            formatter: function (w) {
+              const total = w.globals.seriesTotals.reduce((a, b) => a + b, 0);
+              return formatCurrency(total);
+            },
+          },
+        },
+      },
+    },
+  },
+  dataLabels: {
+    enabled: true,
+    formatter: function (val) {
+      return val.toFixed(1) + '%';
+    },
+  },
+  tooltip: {
+    y: {
+      formatter: function (val) {
+        return formatCurrency(val);
+      },
+    },
+  },
+};
+</script>
+
+<style>
+.bg-grid-white\/\[0\.05\] {
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' width='32' height='32' fill='none' stroke='rgb(255 255 255 / 0.05)'%3e%3cpath d='M0 .5H31.5V32'/%3e%3c/svg%3e");
+}
+</style>

@@ -1,0 +1,100 @@
+{
+  "model_info": {
+    "name": "Multi-Output LSTM",
+    "version": "2.0",
+    "created": "2026-01-26 12:40:00",
+    "description": "Predicts 4 room types: STD, SPR, FMY, JS - Final Academic Research Model (Batch 4)"
+  },
+  "preprocessing": {
+    "normalization": "Pre-normalized by Data_Hotel.ipynb MinMaxScaler",
+    "range": "[0, 1]",
+    "note": "No additional scaler - data already normalized"
+  },
+  "input": {
+    "features": [
+      "Kamar_Terjual",
+      "Okupansi_Rate",
+      "occ_momentum",
+      "occ_trend",
+      "occ_rolling_mean_3",
+      "occ_yoy",
+      "std_proportion",
+      "is_increasing",
+      "is_peak_season",
+      "js_proportion",
+      "fmy_proportion",
+      "spr_proportion",
+      "occ_rolling_mean_6",
+      "occ_rolling_std_3",
+      "occ_lag_1"
+    ],
+    "num_features": 15,
+    "sequence_length": 6,
+    "shape": "(batch, 6, 15)"
+  },
+  "output": {
+    "targets": [
+      "Kamar_STD",
+      "Kamar_SPR",
+      "Kamar_FMY",
+      "Kamar_JS"
+    ],
+    "num_outputs": 4,
+    "range": "[0, 1] normalized"
+  },
+  "architecture": {
+    "type": "Stacked LSTM",
+    "layers": [
+      "LSTM(32, return_sequences=True) + Dropout(0.3)",
+      "LSTM(16) + Dropout(0.3)",
+      "Dense(8, relu)",
+      "Dense(4, linear)"
+    ],
+    "params": "~9,196",
+    "optimizer": "Adam (lr=0.001)",
+    "loss": "MSE"
+  },
+  "performance": {
+    "overall": {
+      "mape": 32.39,
+      "mae": 0.1162,
+      "rmse": 0.1474,
+      "r2": 0.2140,
+      "batch": "Batch 4 - Final Model"
+    },
+    "per_room": {
+      "STD": {
+        "mape": 27.40,
+        "mae": 0.1322,
+        "rmse": 0.1463,
+        "r2": 0.0134
+      },
+      "SPR": {
+        "mape": 26.42,
+        "mae": 0.0927,
+        "rmse": 0.1147,
+        "r2": 0.2937
+      },
+      "FMY": {
+        "mape": 56.99,
+        "mae": 0.1354,
+        "rmse": 0.1422,
+        "r2": -0.5624
+      },
+      "JS": {
+        "mape": 18.74,
+        "mae": 0.1044,
+        "rmse": 0.1791,
+        "r2": -0.2622
+      }
+    },
+    "dataset": {
+      "note": "Final academic research model - Batch 4 configuration"
+    }
+  },
+  "notes": {
+    "challenge": "Data imbalance - FMY & JS have low volume",
+    "use_case": "Detailed per-room-type analysis",
+    "deployment": "Dashboard feature: Prediksi per Tipe Kamar"
+  }
+}

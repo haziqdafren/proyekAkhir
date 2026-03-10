@@ -1,0 +1,90 @@
+{
+  "model_info": {
+    "name": "Single-Output LSTM",
+    "version": "2.0",
+    "created": "2026-01-26 12:40:00",
+    "description": "Predicts total occupancy (Kamar_Terjual) - Final Academic Research Model (80-10-10 split)",
+    "status": "\u2b50 RECOMMENDED FOR PRODUCTION"
+  },
+  "preprocessing": {
+    "normalization": "Pre-normalized by Data_Hotel.ipynb MinMaxScaler",
+    "range": "[0, 1]",
+    "scaler_location": "Use MinMaxScaler from Data_Hotel.ipynb if denormalization needed",
+    "note": "No scaler saved - data already normalized at preprocessing stage"
+  },
+  "input": {
+    "features": [
+      "Kamar_Terjual",
+      "Okupansi_Rate",
+      "occ_momentum",
+      "occ_trend",
+      "occ_rolling_mean_3",
+      "occ_yoy",
+      "std_proportion",
+      "is_increasing",
+      "is_peak_season",
+      "js_proportion",
+      "fmy_proportion",
+      "spr_proportion",
+      "occ_rolling_mean_6",
+      "occ_rolling_std_3",
+      "occ_lag_1"
+    ],
+    "num_features": 15,
+    "sequence_length": 6,
+    "shape": "(batch, 6, 15)"
+  },
+  "output": {
+    "target": "Kamar_Terjual (total occupancy)",
+    "num_outputs": 1,
+    "range": "[0, 1] normalized"
+  },
+  "architecture": {
+    "type": "Stacked LSTM",
+    "layers": [
+      "LSTM(64, return_sequences=True) + Dropout(0.3)",
+      "LSTM(32) + Dropout(0.3)",
+      "Dense(16, relu)",
+      "Dense(1, linear)"
+    ],
+    "params": "~30,000",
+    "optimizer": "Adam (lr=0.001)",
+    "loss": "MSE"
+  },
+  "performance": {
+    "mape": 17.18,
+    "mae": "Not provided",
+    "rmse": "Not provided",
+    "r2": 0.4208,
+    "val_loss": "Not provided",
+    "split": "80-10-10 (BEST)",
+    "dataset": {
+      "train": "80%",
+      "val": "10%",
+      "test": "10%",
+      "note": "Final academic research model with improved performance"
+    }
+  },
+  "comparison": {
+    "vs_multi_output": {
+      "mape_improvement": "47% better (32.39% \u2192 17.18%)",
+      "r2_improvement": "Significantly better R\u00b2 (0.214 \u2192 0.4208)",
+      "winner": "Single-Output \u2705 - BEST MODEL FOR PRODUCTION"
+    }
+  },
+  "deployment": {
+    "usage": "Main dashboard predictions & capacity planning",
+    "denormalization": {
+      "method": "Manual scaling if needed",
+      "formula": "actual_value = normalized * (max - min) + min",
+      "note": "Or use MinMaxScaler from Data_Hotel.ipynb preprocessing"
+    },
+    "input_format": "Normalized features [0, 1] in shape (1, seq_length, num_features)",
+    "output_format": "Normalized occupancy [0, 1], single float value"
+  },
+  "notes": {
+    "advantage": "Better for imbalanced data & total capacity focus",
+    "primary_model": "YES - Use this for production deployment",
+    "no_scaler": "Data pre-normalized, no additional scaling needed"
+  }
+}
