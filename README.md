@@ -8,7 +8,7 @@ A machine learning-powered occupancy prediction system built for final year proj
 
 ---
 
-## 📊 The System Pipeline
+## The System Pipeline
 
 ```
 Excel Upload → Laravel Queue → Data Parsing → Database Storage → ML API (Flask)
@@ -20,7 +20,7 @@ User Dashboard ← Laravel Backend ← Champion Model ← LSTM Training (TensorF
 
 ---
 
-## 🎯 Project Overview
+## Project Overview
 
 This system predicts hotel occupancy rates for **Dharma Utama Hotel Pekanbaru** using historical data from **2021-2025**. The hotel has **56 total rooms** across **4 room types**:
 - **Standard (STD)**
@@ -357,7 +357,7 @@ hotel-dashboard/
 
 ---
 
-## 🚀 Running the System
+## Running the System
 
 ### Prerequisites
 
@@ -437,14 +437,14 @@ Password: password
 
 ---
 
-## 📈 Current Performance
+## Current Performance
 
 ### Champion Models (as of Feb 2026)
 
 | Model Type | MAPE | R² Score | RMSE | Status |
 |------------|------|----------|------|--------|
-| **Single Output** | **4.06%** | -0.16 | 0.047 | ✅ Champion |
-| **Multi Output** | **15.95%** | -2.02 | 0.092 | ✅ Champion |
+| **Single Output** | **4.06%** | -0.16 | 0.047 | Champion |
+| **Multi Output** | **15.95%** | -2.02 | 0.092 | Champion |
 
 **Interpretation**:
 - **Single Model**: 95.94% accuracy in predicting aggregate occupancy (excellent!)
@@ -459,7 +459,7 @@ Password: password
 
 ---
 
-## 🎯 Key Features
+## Key Features
 
 1. **Automatic Data Processing** — Upload Excel, system handles everything
 2. **Intelligent Model Management** — Champion model auto-selection based on MAPE
@@ -469,7 +469,7 @@ Password: password
 
 ---
 
-## 🔮 Future Enhancements
+## Future Enhancements
 
 ### Phase 2 (Planned)
 
@@ -481,7 +481,7 @@ Password: password
 
 ---
 
-## 🐛 Known Issues
+## Known Issues
 
 ### 1. Negative R² Scores
 **Status**: Known issue, planned for fix  
@@ -500,7 +500,7 @@ Password: password
 
 ---
 
-## 📝 License & Academic Use
+## License & Academic Use
 
 This project is developed as a final year project for **Politeknik Caltex Riau**.
 
@@ -508,7 +508,7 @@ This project is developed as a final year project for **Politeknik Caltex Riau**
 
 ---
 
-## 📞 Contact
+## Contact
 
 **Developer**: Mohamad Haziq Dafren  
 **Student ID**: 2355301119  
@@ -517,7 +517,7 @@ This project is developed as a final year project for **Politeknik Caltex Riau**
 
 ---
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - **Dharma Utama Hotel Pekanbaru** for providing real historical occupancy data
 - **Politeknik Caltex Riau** for academic support and resources
