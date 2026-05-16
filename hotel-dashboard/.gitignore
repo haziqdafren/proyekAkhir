@@ -21,3 +21,36 @@ yarn-error.log
 /.nova
 /.vscode
 /.zed
+
+# OS files
+.DS_Store
+*.DS_Store
+
+# SQLite database (contains real hotel data — do not commit)
+/database/database.sqlite
+/database/database.sqlite-wal
+/database/database.sqlite-shm
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+ml-api/__pycache__/
+
+# Uploaded guest Excel files (private hotel data)
+/storage/app/private/
+
+# Laravel framework cache
+/storage/framework/cache/
+/storage/framework/sessions/
+/storage/framework/views/
+/storage/logs/
+
+# Backup files
+*.backup
+*.bak
+*.vue.backup
+
+# Revenue map (generated file — rebuilt from Clean.xlsx)
+/storage/app/revenue_map.json

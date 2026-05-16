@@ -4,6 +4,7 @@ Provides endpoints for model training, retraining, and predictions.
 """
 
 import os
+import re
 import sys
 import json
 import time
@@ -11,6 +12,7 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
+from functools import wraps
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import numpy as np
@@ -19,9 +21,58 @@ import numpy as np
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 app = Flask(__name__)
-CORS(app)
+
+# CORS — only allow requests from the Laravel app (localhost in dev, set ML_ALLOWED_ORIGIN in prod)
+_allowed_origin = os.getenv('ML_ALLOWED_ORIGIN', 'http://localhost:8000')
+CORS(app, resources={
+    r"/api/*": {
+        "origins": [_allowed_origin, 'http://127.0.0.1:8000'],
+        "methods": ["GET", "POST"],
+        "allow_headers": ["Content-Type", "X-API-Key"],
+    }
+})
 
 # Configuration
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB request size limit
+
+# ── API key authentication ─────────────────────────────────────────────────
+_API_KEY = os.getenv('ML_API_KEY', '')
+
+def require_api_key(f):
+    """Decorator: reject requests that don't supply the correct X-API-Key header."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        # Skip auth in development if no key is configured
+        if _API_KEY and request.headers.get('X-API-Key') != _API_KEY:
+            return jsonify({'success': False, 'error': 'Unauthorized'}), 401
+        return f(*args, **kwargs)
+    return decorated
+
+
+_VALID_MODEL_TYPES = {'single', 'multi'}
+_VALID_VERSION_RE  = re.compile(r'^\d+\.\d+\.\d+$')
+
+def validate_model_type(model_type: str):
+    """Return (model_type, error_response) — error_response is None when valid (#4)."""
+    if model_type not in _VALID_MODEL_TYPES:
+        return None, jsonify({'success': False, 'error': f'Invalid model_type: {model_type!r}. Must be "single" or "multi"'}), 400
+    return model_type, None
+
+def validate_version(version: str):
+    """Return (version, error_response) — error_response is None when valid (#4)."""
+    if not version or not _VALID_VERSION_RE.match(str(version)):
+        return None, jsonify({'success': False, 'error': 'Invalid version format. Expected x.y.z'}), 400
+    return version, None
+
+@app.errorhandler(413)
+def request_entity_too_large(error):
+    """Handle request size limit exceeded"""
+    return jsonify({
+        'success': False,
+        'error': 'Request too large. Maximum size is 50MB.',
+        'error_type': 'PayloadTooLarge'
+    }), 413
+
 BASE_DIR = Path(__file__).parent.parent
 MODELS_DIR = BASE_DIR / 'storage' / 'app' / 'models'
 ORIGINAL_MODELS_DIR = BASE_DIR.parent  # /proyekAkhir directory
@@ -45,6 +96,7 @@ def health_check():
 
 
 @app.route('/api/retrain', methods=['POST'])
+@require_api_key
 def retrain_model():
     """
     Retrain a model with new data.
@@ -67,13 +119,24 @@ def retrain_model():
     """
     try:
         data = request.get_json()
-        model_type = data.get('model_type', 'single')
+        model_type, err = validate_model_type(data.get('model_type', 'single'))
+        if err:
+            return err
         test_mode = data.get('test_mode', False)
         training_data = data.get('training_data', [])
-        
+
+        # Security: test_mode (simulate) only allowed in development
+        # Production environment check via FLASK_ENV or APP_ENV
+        is_production = os.getenv('FLASK_ENV') == 'production' or os.getenv('APP_ENV') == 'production'
+        if test_mode and is_production:
+            return jsonify({
+                'success': False,
+                'error': 'test_mode is not allowed in production environment'
+            }), 403
+
         # Import TensorFlow here to avoid startup delay
         import tensorflow as tf
-        from train_model import train_lstm_model, evaluate_model
+        from train_model import train_lstm_model
         
         # Generate version number
         version = generate_next_version(model_type)
@@ -120,6 +183,7 @@ def retrain_model():
 
 
 @app.route('/api/predict', methods=['POST'])
+@require_api_key
 def predict():
     """
     Make prediction using champion model.
@@ -133,18 +197,21 @@ def predict():
     """
     try:
         data = request.get_json()
-        model_type = data.get('model_type', 'single')
+        model_type, err = validate_model_type(data.get('model_type', 'single'))
+        if err:
+            return err
         features = data.get('features')
-        custom_model_path = data.get('model_path')
-        
+
         if features is None:
             return jsonify({'success': False, 'error': 'Missing features'}), 400
-        
-        # Determine model path
-        if custom_model_path:
-            model_path = Path(custom_model_path)
-        else:
-            model_path = MODELS_DIR / model_type / 'champion.keras'
+
+        # Validate shape (6, 15) before reshape
+        if (not isinstance(features, list) or len(features) != 6
+                or not all(isinstance(m, list) and len(m) == 15 for m in features)):
+            return jsonify({'success': False, 'error': 'features must be shape (6, 15)'}), 400
+
+        # Always use champion — no custom_model_path to prevent path traversal
+        model_path = MODELS_DIR / model_type / 'champion.keras'
         
         if not model_path.exists():
             return jsonify({
@@ -195,6 +262,7 @@ def predict():
 
 
 @app.route('/api/copy-champion', methods=['POST'])
+@require_api_key
 def copy_champion():
     """
     Copy a specific model version to champion.
@@ -207,9 +275,13 @@ def copy_champion():
     """
     try:
         data = request.get_json()
-        model_type = data.get('model_type', 'single')
-        version = data.get('version')
-        
+        model_type, err = validate_model_type(data.get('model_type', 'single'))
+        if err:
+            return err
+        version, err = validate_version(data.get('version'))
+        if err:
+            return err
+
         source_path = MODELS_DIR / model_type / f'v{version}.keras'
         champion_path = MODELS_DIR / model_type / 'champion.keras'
         
@@ -235,6 +307,7 @@ def copy_champion():
 
 
 @app.route('/api/init-models', methods=['POST'])
+@require_api_key
 def init_models():
     """
     Initialize model storage by copying original models as v1.0.0 and champion.
@@ -312,12 +385,13 @@ def generate_next_version(model_type: str) -> str:
 def simulate_training(model_type: str, output_path: Path) -> dict:
     """
     Simulate training by copying existing champion and generating random metrics.
-    Used for testing the pipeline without actual training.
+    Includes a realistic delay (simulated epochs) so the demo feels like real training.
+    Used for testing the pipeline without running actual LSTM training.
     """
     import random
-    
+
     champion_path = MODELS_DIR / model_type / 'champion.keras'
-    
+
     # If champion exists, copy it
     if champion_path.exists():
         shutil.copy2(champion_path, output_path)
@@ -327,26 +401,42 @@ def simulate_training(model_type: str, output_path: Path) -> dict:
             source = ORIGINAL_MODELS_DIR / 'single_output' / 'lstm_single_final.keras'
         else:
             source = ORIGINAL_MODELS_DIR / 'multi_output' / 'lstm_multi_final.keras'
-        
+
         if source.exists():
             shutil.copy2(source, output_path)
         else:
             return {'success': False, 'error': 'No source model found for simulation'}
-    
-    # Generate realistic random metrics
-    # Single output baseline: MAPE 17.18%, R² 0.4208
-    # Multi output baseline: MAPE 32.39%, R² 0.214
-    if model_type == 'single':
-        base_mape = 17.18
-        base_r2 = 0.4208
-    else:
-        base_mape = 32.39
-        base_r2 = 0.214
-    
-    # Add some randomness (±15% variation)
-    mape_variation = random.uniform(-0.15, 0.15)
-    r2_variation = random.uniform(-0.1, 0.1)
-    
+
+    # Simulate realistic epoch-by-epoch training time.
+    # Real training on 11 months of data stops at ~20-40 epochs (patience=10).
+    # We simulate ~25 epochs at ~1s each = ~25s total — believable for a CPU run.
+    simulated_epochs = random.randint(20, 35)
+    epoch_time = random.uniform(0.6, 1.2)  # seconds per epoch (CPU speed)
+    time.sleep(simulated_epochs * epoch_time)
+
+    # Generate realistic random metrics based on current champion (if exists)
+    try:
+        metadata_path = MODELS_DIR / model_type / 'champion_metadata.json'
+        if metadata_path.exists():
+            with open(metadata_path, 'r') as f:
+                champion_meta = json.load(f)
+                base_mape = champion_meta.get('mape', 20.0)
+                base_r2 = champion_meta.get('r2_score', 0.3)
+        else:
+            if model_type == 'single':
+                base_mape = 17.18
+                base_r2 = 0.4208
+            else:
+                base_mape = 32.39
+                base_r2 = 0.214
+    except:
+        base_mape = 20.0
+        base_r2 = 0.3
+
+    # Add some randomness (±10% variation)
+    mape_variation = random.uniform(-0.10, 0.10)
+    r2_variation = random.uniform(-0.08, 0.08)
+
     return {
         'success': True,
         'metrics': {
@@ -354,7 +444,8 @@ def simulate_training(model_type: str, output_path: Path) -> dict:
             'r2_score': round(min(1.0, max(0.0, base_r2 + r2_variation)), 4),
             'rmse': round(random.uniform(0.08, 0.18), 4),
         },
-        'simulated': True
+        'simulated': True,
+        'epochs_trained': simulated_epochs,
     }
 
 

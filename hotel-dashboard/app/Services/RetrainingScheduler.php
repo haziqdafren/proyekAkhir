@@ -8,32 +8,25 @@ use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Professional 6-Month Retraining Scheduler
+ * Annual Retraining Scheduler — fixed October cycle
  *
- * Manages intelligent model retraining recommendations based on:
- * - Time since last training (6-month cycle)
- * - Amount of new data available
- * - Data quality thresholds
+ * Retraining happens once a year every October.
+ * New data is counted from the training data cutoff (Oct 2025) onward.
  */
 class RetrainingScheduler
 {
-    /**
-     * Recommended retraining interval in months
-     */
-    private const RETRAINING_INTERVAL_MONTHS = 6;
+    private const RETRAINING_INTERVAL_MONTHS = 12;
+    private const MINIMUM_NEW_DATA_MONTHS    = 6;
+    private const WARNING_THRESHOLD_MONTHS   = 10;
+
+    // Fixed anchor: original training data ended October 2025.
+    // Each year retraining is due in October.
+    private const TRAINING_DATA_CUTOFF = '2025-10-31';
+    private const RETRAINING_MONTH     = 10; // October
 
     /**
-     * Minimum new data months before allowing retraining
-     */
-    private const MINIMUM_NEW_DATA_MONTHS = 3;
-
-    /**
-     * Warning threshold (show reminder)
-     */
-    private const WARNING_THRESHOLD_MONTHS = 4;
-
-    /**
-     * Get comprehensive retraining status for dashboard display
+     * Get retraining status for a single model type.
+     * Read-only — no side effects.
      */
     public function getRetrainingStatus(string $modelType = 'single'): array
     {
@@ -41,203 +34,169 @@ class RetrainingScheduler
 
         if (!$champion) {
             return [
-                'status' => 'no_model',
-                'urgency' => 'critical',
+                'status'        => 'no_model',
+                'urgency'       => 'critical',
                 'should_retrain' => true,
-                'message' => 'No champion model exists. Please train initial model.',
-                'action_text' => 'Train Initial Model',
-                'icon' => '⚠️',
-                'color' => 'red',
+                'message'       => 'Belum ada model champion. Lakukan training awal.',
+                'action_text'   => 'Train Model',
+                'color'         => 'red',
+                'months_since_training' => null,
+                'new_data_months'       => 0,
+                'new_data_percentage'   => 0,
+                'next_due'              => null,
             ];
         }
 
-        // Calculate time-based metrics
-        $trainedAt = $champion->trained_at ? Carbon::parse($champion->trained_at) : $champion->created_at;
-        $monthsSinceTraining = (int) $trainedAt->diffInMonths(now());
-        $nextDue = $champion->next_retraining_due ? Carbon::parse($champion->next_retraining_due) : $trainedAt->copy()->addMonths(self::RETRAINING_INTERVAL_MONTHS);
+        // Next retraining is always in October. Find the next upcoming October.
+        $now     = Carbon::now();
+        $nextDue = Carbon::create($now->year, self::RETRAINING_MONTH, 1)->startOfMonth();
+        if ($nextDue->lte($now)) {
+            $nextDue->addYear();
+        }
 
-        // Calculate data-based metrics
-        $newDataMonths = $this->countNewDataMonths($trainedAt);
-        $newDataPercentage = $this->calculateNewDataPercentage($champion, $newDataMonths);
+        // Months remaining until next October
+        $monthsSinceTraining = (int) $now->diffInMonths($nextDue, false) * -1;
+        // Reframe: how many months since the fixed cutoff (Oct 2025)
+        $cutoff              = Carbon::parse(self::TRAINING_DATA_CUTOFF);
+        $monthsSinceCutoff   = (int) $cutoff->diffInMonths($now);
 
-        // Update champion with current counts
-        $this->updateChampionMetrics($champion, $newDataMonths, $nextDue);
+        $newDataMonths       = $this->countNewDataMonths($cutoff);
+        $newDataPercentage   = $this->calculateNewDataPercentage($champion, $newDataMonths);
 
-        // Determine status
-        return $this->determineStatus(
+        // Use months-since-cutoff to determine overdue/approaching/optimal
+        $monthsSinceTraining = $monthsSinceCutoff;
+
+        return $this->buildStatus(
             $monthsSinceTraining,
             $newDataMonths,
             $newDataPercentage,
-            $nextDue,
-            $modelType
+            $nextDue
         );
     }
 
     /**
-     * Count how many new months of data available since last training
+     * Count distinct months of data uploaded after the training data cutoff (Oct 2025).
      */
-    private function countNewDataMonths(Carbon $trainedAt): int
+    private function countNewDataMonths(Carbon $cutoff): int
     {
-        $latestData = HistoricalOccupancyData::orderBy('date', 'desc')->first();
-
-        if (!$latestData) {
-            return 0;
-        }
-
-        $latestDataDate = Carbon::parse($latestData->date);
-
-        // Count distinct months between training date and latest data
-        $monthsBetween = (int) $trainedAt->diffInMonths($latestDataDate);
-
-        return max(0, $monthsBetween);
+        return HistoricalOccupancyData::where('date', '>', $cutoff->toDateString())
+            ->selectRaw("strftime('%Y-%m', date) as ym")
+            ->groupByRaw("strftime('%Y-%m', date)")
+            ->get()
+            ->count();
     }
 
     /**
-     * Calculate percentage of new data relative to training set
+     * New-data percentage relative to the training record count.
      */
     private function calculateNewDataPercentage(ModelVersion $champion, int $newDataMonths): float
     {
-        $originalRecords = $champion->trained_on_records ?? 48; // Default 48 months
+        $originalRecords = $champion->trained_on_records ?: 24;
 
-        if ($originalRecords == 0) {
-            return 0;
-        }
-
-        return ($newDataMonths / $originalRecords) * 100;
+        return round(($newDataMonths / $originalRecords) * 100, 1);
     }
 
     /**
-     * Update champion model with current metrics
+     * Pure status builder — no database writes.
      */
-    private function updateChampionMetrics(ModelVersion $champion, int $newDataMonths, Carbon $nextDue): void
-    {
-        $champion->update([
-            'new_data_months_count' => $newDataMonths,
-            'next_retraining_due' => $nextDue,
-        ]);
-    }
-
-    /**
-     * Determine retraining status and recommendation
-     */
-    private function determineStatus(
+    private function buildStatus(
         int $monthsSinceTraining,
         int $newDataMonths,
         float $newDataPercentage,
-        Carbon $nextDue,
-        string $modelType
+        Carbon $nextDue
     ): array {
-        // CRITICAL: Overdue
-        if ($monthsSinceTraining >= self::RETRAINING_INTERVAL_MONTHS) {
-            return [
-                'status' => 'overdue',
-                'urgency' => 'high',
-                'should_retrain' => true,
-                'message' => "Model retraining overdue! It's been {$monthsSinceTraining} months since last training.",
-                'details' => "You have {$newDataMonths} months of new data ({$newDataPercentage}% increase).",
-                'next_due' => $nextDue->format('M d, Y'),
-                'months_since_training' => $monthsSinceTraining,
-                'new_data_months' => $newDataMonths,
-                'new_data_percentage' => round($newDataPercentage, 1),
-                'action_text' => 'Retrain Now',
-                'icon' => '🔴',
-                'color' => 'red',
-            ];
-        }
-
-        // WARNING: Approaching retraining time
-        if ($monthsSinceTraining >= self::WARNING_THRESHOLD_MONTHS) {
-            return [
-                'status' => 'approaching',
-                'urgency' => 'medium',
-                'should_retrain' => $newDataMonths >= self::MINIMUM_NEW_DATA_MONTHS,
-                'message' => "Retraining recommended in " . (self::RETRAINING_INTERVAL_MONTHS - $monthsSinceTraining) . " month(s).",
-                'details' => "{$newDataMonths} months of new data available. Sufficient for retraining.",
-                'next_due' => $nextDue->format('M d, Y'),
-                'months_since_training' => $monthsSinceTraining,
-                'new_data_months' => $newDataMonths,
-                'new_data_percentage' => round($newDataPercentage, 1),
-                'action_text' => 'Retrain Early',
-                'icon' => '⚠️',
-                'color' => 'yellow',
-            ];
-        }
-
-        // GOOD: Recently trained, sufficient new data
-        if ($newDataMonths >= self::MINIMUM_NEW_DATA_MONTHS && $monthsSinceTraining >= 3) {
-            return [
-                'status' => 'ready',
-                'urgency' => 'low',
-                'should_retrain' => false,
-                'message' => "Model is current. Next retraining due {$nextDue->format('M d, Y')}.",
-                'details' => "{$newDataMonths} months of new data available. You may retrain early if needed.",
-                'next_due' => $nextDue->format('M d, Y'),
-                'months_since_training' => $monthsSinceTraining,
-                'new_data_months' => $newDataMonths,
-                'new_data_percentage' => round($newDataPercentage, 1),
-                'action_text' => 'Optional: Retrain Early',
-                'icon' => '✅',
-                'color' => 'green',
-            ];
-        }
-
-        // OPTIMAL: Recently trained, not enough new data yet
-        return [
-            'status' => 'optimal',
-            'urgency' => 'none',
-            'should_retrain' => false,
-            'message' => "Model is fresh and performing well.",
-            'details' => "Only {$newDataMonths} months of new data. Wait for {$nextDue->diffForHumans()}.",
-            'next_due' => $nextDue->format('M d, Y'),
+        $base = [
             'months_since_training' => $monthsSinceTraining,
-            'new_data_months' => $newDataMonths,
-            'new_data_percentage' => round($newDataPercentage, 1),
-            'action_text' => 'No Action Needed',
-            'icon' => '💚',
-            'color' => 'green',
+            'new_data_months'       => $newDataMonths,
+            'new_data_percentage'   => $newDataPercentage,
+            'next_due'              => $nextDue->format('d M Y'),
+        ];
+
+        $remaining = max(0, self::RETRAINING_INTERVAL_MONTHS - $monthsSinceTraining);
+        $needed    = max(0, self::MINIMUM_NEW_DATA_MONTHS - $newDataMonths);
+
+        // Overdue — annual retraining cycle has expired
+        if ($monthsSinceTraining >= self::RETRAINING_INTERVAL_MONTHS) {
+            return $base + [
+                'status'         => 'overdue',
+                'urgency'        => 'high',
+                'should_retrain' => true,
+                'message'        => "Model sudah {$monthsSinceTraining} bulan belum dilatih ulang. Siklus tahunan telah habis — segera lakukan retraining dengan data penuh yang tersedia.",
+                'action_text'    => 'Retrain Sekarang',
+                'color'          => 'red',
+            ];
+        }
+
+        // Approaching — within 2-month warning window before annual due date
+        if ($monthsSinceTraining >= self::WARNING_THRESHOLD_MONTHS) {
+            $canRetrain = $newDataMonths >= self::MINIMUM_NEW_DATA_MONTHS;
+            $msg = $canRetrain
+                ? "{$newDataMonths} bulan data baru tersimpan. Jadwal retrain tahunan: {$nextDue->format('M Y')} ({$remaining} bulan lagi) — sudah cukup data baru, bisa retrain lebih awal."
+                : "{$newDataMonths} bulan data baru tersimpan. Jadwal retrain tahunan: {$nextDue->format('M Y')} ({$remaining} bulan lagi) — upload data bulanan untuk mempersiapkan retraining.";
+            return $base + [
+                'status'         => 'approaching',
+                'urgency'        => 'medium',
+                'should_retrain' => $canRetrain,
+                'message'        => $msg,
+                'action_text'    => $canRetrain ? 'Retrain Lebih Awal' : 'Upload Data Dulu',
+                'color'          => 'yellow',
+            ];
+        }
+
+        // Optimal — within annual cycle, keep uploading monthly data
+        return $base + [
+            'status'         => 'optimal',
+            'urgency'        => 'none',
+            'should_retrain' => false,
+            'message'        => "Model berjalan baik. Jadwal retraining tahunan berikutnya: {$nextDue->format('M Y')} ({$remaining} bulan lagi). Terus upload data bulanan secara rutin.",
+            'action_text'    => 'Tidak Perlu Tindakan',
+            'color'          => 'green',
         ];
     }
 
     /**
-     * Mark retraining as completed and schedule next one
+     * Mark retraining as completed and schedule the next cycle.
+     * This is the only method that writes to the database.
      */
     public function markRetrainingCompleted(ModelVersion $newChampion): void
     {
-        $nextDue = now()->addMonths(self::RETRAINING_INTERVAL_MONTHS);
+        $now     = Carbon::now();
+        $nextDue = Carbon::create($now->year, self::RETRAINING_MONTH, 1)->startOfMonth();
+        if ($nextDue->lte($now)) {
+            $nextDue->addYear();
+        }
 
         $newChampion->update([
-            'next_retraining_due' => $nextDue,
+            'next_retraining_due'  => $nextDue,
             'new_data_months_count' => 0,
-            'retraining_notes' => "Trained on " . now()->format('Y-m-d H:i') . ". Next retraining due: " . $nextDue->format('Y-m-d'),
+            'retraining_notes'     => 'Trained ' . now()->format('Y-m-d H:i') . '. Next due: ' . $nextDue->format('Y-m-d'),
         ]);
 
-        Log::info("Retraining completed. Next due: {$nextDue->format('Y-m-d')}", [
+        Log::info('Retraining completed. Next due: ' . $nextDue->format('Y-m-d'), [
             'model_version' => $newChampion->version,
-            'model_type' => $newChampion->model_type,
+            'model_type'    => $newChampion->model_type,
         ]);
     }
 
     /**
-     * Get summary for all model types
+     * Get status for both model types.
      */
     public function getAllModelsStatus(): array
     {
         return [
             'single' => $this->getRetrainingStatus('single'),
-            'multi' => $this->getRetrainingStatus('multi'),
+            'multi'  => $this->getRetrainingStatus('multi'),
         ];
     }
 
     /**
-     * Check if any model needs urgent retraining
+     * Returns true if any model type urgently needs retraining.
      */
     public function hasUrgentRetraining(): bool
     {
         $statuses = $this->getAllModelsStatus();
 
-        return $statuses['single']['urgency'] === 'high' ||
-               $statuses['single']['urgency'] === 'critical' ||
-               $statuses['multi']['urgency'] === 'high' ||
-               $statuses['multi']['urgency'] === 'critical';
+        return in_array($statuses['single']['urgency'], ['high', 'critical'])
+            || in_array($statuses['multi']['urgency'],  ['high', 'critical']);
     }
 }

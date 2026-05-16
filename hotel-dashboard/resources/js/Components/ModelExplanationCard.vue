@@ -68,7 +68,7 @@
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
                 <div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block w-64 p-3 bg-gray-900 text-white text-xs rounded-lg z-10">
-                  MAPE (Mean Absolute Percentage Error): Semakin rendah semakin akurat. Angka ini menunjukkan rata-rata kesalahan prediksi dalam persen.
+                  Tingkat akurasi menunjukkan seberapa tepat sistem memprediksi tingkat hunian. Semakin tinggi nilainya, semakin akurat prediksinya.
                   <div class="absolute top-full left-1/2 -translate-x-1/2 -mt-1 border-4 border-transparent border-t-gray-900"></div>
                 </div>
               </div>
@@ -77,11 +77,11 @@
               <div
                 class="h-full rounded-full transition-all duration-1000"
                 :class="accuracyColor"
-                :style="{ width: `${100 - mape}%` }"
+                :style="{ width: `${accuracyValue}%` }"
               ></div>
             </div>
             <div class="flex justify-between items-center mt-1">
-              <span class="text-xs text-gray-600">MAPE: {{ mape }}%</span>
+              <span class="text-xs text-gray-600">Akurasi: {{ accuracyValue }}%</span>
               <span class="text-xs font-semibold" :class="accuracyTextColor">{{ accuracyLabel }}</span>
             </div>
           </div>
@@ -143,7 +143,11 @@ const props = defineProps({
   },
   mape: {
     type: Number,
-    required: true,
+    default: null,
+  },
+  accuracy: {
+    type: Number,
+    default: null,
   },
   isRecommended: {
     type: Boolean,
@@ -151,21 +155,27 @@ const props = defineProps({
   },
 });
 
+const accuracyValue = computed(() => {
+  if (props.accuracy !== null) return props.accuracy;
+  if (props.mape !== null) return Math.round((100 - props.mape) * 10) / 10;
+  return 0;
+});
+
 const accuracyColor = computed(() => {
-  if (props.mape < 25) return 'bg-gradient-to-r from-green-500 to-emerald-600';
-  if (props.mape < 35) return 'bg-gradient-to-r from-yellow-500 to-orange-500';
+  if (accuracyValue.value >= 75) return 'bg-gradient-to-r from-green-500 to-emerald-600';
+  if (accuracyValue.value >= 65) return 'bg-gradient-to-r from-yellow-500 to-orange-500';
   return 'bg-gradient-to-r from-red-500 to-rose-600';
 });
 
 const accuracyTextColor = computed(() => {
-  if (props.mape < 25) return 'text-green-600';
-  if (props.mape < 35) return 'text-yellow-600';
+  if (accuracyValue.value >= 75) return 'text-green-600';
+  if (accuracyValue.value >= 65) return 'text-yellow-600';
   return 'text-red-600';
 });
 
 const accuracyLabel = computed(() => {
-  if (props.mape < 25) return 'Sangat Baik ⭐';
-  if (props.mape < 35) return 'Baik';
+  if (accuracyValue.value >= 75) return 'Sangat Baik ⭐';
+  if (accuracyValue.value >= 65) return 'Baik';
   return 'Cukup';
 });
 </script>

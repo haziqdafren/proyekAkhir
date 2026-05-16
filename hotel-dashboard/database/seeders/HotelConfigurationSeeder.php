@@ -24,7 +24,7 @@ class HotelConfigurationSeeder extends Seeder
                 'name' => 'Standard Room',
                 'description' => 'Kamar standar dengan fasilitas lengkap, termasuk sarapan pagi',
                 'capacity' => 2,
-                'total_rooms' => 27,
+                'total_rooms' => 32,
                 'base_price' => 180000, // Rp. 180.000
                 'is_active' => true,
                 'created_at' => Carbon::now(),
@@ -35,7 +35,7 @@ class HotelConfigurationSeeder extends Seeder
                 'name' => 'Superior Room',
                 'description' => 'Kamar superior dengan view yang lebih baik, termasuk sarapan pagi',
                 'capacity' => 2,
-                'total_rooms' => 23,
+                'total_rooms' => 19,
                 'base_price' => 220000, // Rp. 220.000
                 'is_active' => true,
                 'created_at' => Carbon::now(),
@@ -57,7 +57,7 @@ class HotelConfigurationSeeder extends Seeder
                 'name' => 'Family Room',
                 'description' => 'Kamar keluarga yang luas, termasuk sarapan pagi',
                 'capacity' => 4,
-                'total_rooms' => 4,
+                'total_rooms' => 3,
                 'base_price' => 400000, // Rp. 400.000
                 'is_active' => true,
                 'created_at' => Carbon::now(),

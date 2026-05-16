@@ -24,10 +24,11 @@ class HistoricalDataAggregationService
     public function getAggregatedMonthlyData(Carbon $startDate, Carbon $endDate): Collection
     {
         // Get all historical data in range (daily data for all days in these months)
+        // IMPORTANT: Use ->copy() to avoid mutating the original Carbon instances
         $rawData = HistoricalOccupancyData::with('roomType')
             ->whereBetween('date', [
-                $startDate->startOfMonth()->format('Y-m-d'),
-                $endDate->endOfMonth()->format('Y-m-d')
+                $startDate->copy()->startOfMonth()->format('Y-m-d'),
+                $endDate->copy()->endOfMonth()->format('Y-m-d')
             ])
             ->orderBy('date')
             ->get();
@@ -87,8 +88,8 @@ class HistoricalDataAggregationService
         // Total average rooms occupied per day
         $totalOccupied = $std_occupied + $spr_occupied + $js_occupied + $fmy_occupied;
 
-        // Total rooms available (56 total)
-        $totalAvailable = 56;
+        // Total rooms available — read from DB, fallback to 56
+        $totalAvailable = (int) RoomType::where('is_active', true)->sum('total_rooms') ?: 56;
 
         // Overall occupancy rate
         $overallRate = $totalAvailable > 0

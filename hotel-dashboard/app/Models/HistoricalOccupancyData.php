@@ -18,7 +18,7 @@ class HistoricalOccupancyData extends Model
     ];
 
     protected $casts = [
-        'date' => 'date',
+        'date' => 'date:Y-m-d',
         'occupancy_rate' => 'decimal:2',
         'revenue' => 'decimal:2',
         'average_daily_rate' => 'decimal:2',

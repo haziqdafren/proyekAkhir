@@ -13,6 +13,9 @@ return [
     // Flask API URL for model serving and retraining
     'flask_api_url' => env('ML_FLASK_API_URL', 'http://127.0.0.1:5000'),
 
+    // Shared secret sent as X-API-Key header — must match ML_API_KEY in ml-api/.env
+    'flask_api_key' => env('ML_API_KEY', ''),
+
     // Python executable - use virtual environment
     'python_path' => env('ML_PYTHON_PATH', base_path('venv/bin/python3')),
 
@@ -43,10 +46,10 @@ return [
     'total_rooms' => env('HOTEL_TOTAL_ROOMS', 56),
     
     'room_capacities' => [
-        'STD' => 27,  // Standard Room
-        'SPR' => 23,  // Superior Room
+        'STD' => 32,  // Standard Room
+        'SPR' => 19,  // Superior Room
         'JS' => 2,    // Junior Suite
-        'FMY' => 4,   // Family Room
+        'FMY' => 3,   // Family Room
     ],
 
     // Feature engineering

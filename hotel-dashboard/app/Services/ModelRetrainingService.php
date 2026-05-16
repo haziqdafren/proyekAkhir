@@ -6,6 +6,7 @@ use App\Models\HistoricalOccupancyData;
 use App\Models\ModelVersion;
 use App\Models\RoomType;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -13,11 +14,13 @@ use Illuminate\Support\Facades\Storage;
 class ModelRetrainingService
 {
     private string $flaskApiUrl;
+    private string $flaskApiKey;
     private string $modelsPath;
 
     public function __construct()
     {
         $this->flaskApiUrl = config('ml.flask_api_url', 'http://127.0.0.1:5000');
+        $this->flaskApiKey = config('ml.flask_api_key', '');
         $this->modelsPath = storage_path('app/models');
         
         // Ensure models directory exists
@@ -85,57 +88,72 @@ class ModelRetrainingService
             ];
             $newVersion->save();
 
-            // Compare with champion and promote if better
+            // Compare with champion and promote if better.
+            // Wrapped in a transaction with row lock to prevent race conditions
+            // when single and multi retraining jobs run concurrently (#3).
             $promoted = false;
             $promotionReason = '';
 
-            // Check if new model is valid
-            if (!$newVersion->isValidModel()) {
-                $promotionReason = "Invalid model: R²={$newVersion->r2_score} (must be 0-1), MAPE={$newVersion->mape}%";
-                Log::warning("New model not promoted - Invalid metrics", [
+            if (!$newVersion->isTrainable()) {
+                $promotionReason = "Model not trainable: R²={$newVersion->r2_score}, MAPE={$newVersion->mape}%";
+                Log::warning("New model not promoted - unusable metrics", [
                     'version' => $newVersion->version,
                     'r2_score' => $newVersion->r2_score,
                     'mape' => $newVersion->mape,
-                ]);
-            } elseif ($newVersion->isBetterThan($currentChampion)) {
-                $newVersion->promoteToChampion();
-                $promoted = true;
-
-                if (!$currentChampion) {
-                    $promotionReason = 'First valid model';
-                } elseif (!$currentChampion->isValidModel()) {
-                    $promotionReason = 'Replaced invalid champion';
-                } else {
-                    $promotionReason = "Better metrics: MAPE {$currentChampion->mape}% → {$newVersion->mape}%, R² {$currentChampion->r2_score} → {$newVersion->r2_score}";
-                }
-
-                // Mark retraining completed and schedule next retraining (6-month cycle)
-                $retrainingScheduler = app(RetrainingScheduler::class);
-                $retrainingScheduler->markRetrainingCompleted($newVersion);
-
-                Log::info("New champion model promoted", [
-                    'version' => $newVersion->version,
-                    'mape' => $newVersion->mape,
-                    'r2_score' => $newVersion->r2_score,
-                    'reason' => $promotionReason,
-                    'improvement' => $newVersion->getImprovementOver($currentChampion),
-                    'next_retraining_due' => $newVersion->fresh()->next_retraining_due,
                 ]);
             } else {
-                if ($currentChampion) {
-                    $promotionReason = "Not better than champion: MAPE {$newVersion->mape}% vs {$currentChampion->mape}%, R² {$newVersion->r2_score} vs {$currentChampion->r2_score}";
-                } else {
-                    $promotionReason = "No champion exists but model is invalid";
-                }
+                $promotionResult = DB::transaction(function () use ($newVersion, $modelType) {
+                    // Lock the current champion row so two concurrent jobs can't both promote
+                    $lockedChampion = ModelVersion::where('model_type', $modelType)
+                        ->where('is_champion', true)
+                        ->lockForUpdate()
+                        ->first();
 
-                Log::info("New model not promoted", [
-                    'version' => $newVersion->version,
-                    'new_mape' => $newVersion->mape,
-                    'new_r2' => $newVersion->r2_score,
-                    'champion_mape' => $currentChampion?->mape,
-                    'champion_r2' => $currentChampion?->r2_score,
-                    'reason' => $promotionReason,
-                ]);
+                    if (!$newVersion->isBetterThan($lockedChampion)) {
+                        return ['promoted' => false, 'champion' => $lockedChampion];
+                    }
+
+                    $newVersion->promoteToChampion();
+                    return ['promoted' => true, 'champion' => $lockedChampion];
+                });
+
+                $promoted = $promotionResult['promoted'];
+                $lockedChampion = $promotionResult['champion'];
+
+                if ($promoted) {
+                    if (!$lockedChampion) {
+                        $promotionReason = 'First valid model';
+                    } elseif (!$lockedChampion->isValidModel()) {
+                        $promotionReason = 'Replaced invalid champion';
+                    } else {
+                        $promotionReason = "Better metrics: MAPE {$lockedChampion->mape}% → {$newVersion->mape}%, R² {$lockedChampion->r2_score} → {$newVersion->r2_score}";
+                    }
+
+                    $retrainingScheduler = app(RetrainingScheduler::class);
+                    $retrainingScheduler->markRetrainingCompleted($newVersion);
+
+                    Log::info("New champion model promoted", [
+                        'version'             => $newVersion->version,
+                        'mape'                => $newVersion->mape,
+                        'r2_score'            => $newVersion->r2_score,
+                        'reason'              => $promotionReason,
+                        'improvement'         => $newVersion->getImprovementOver($lockedChampion),
+                        'next_retraining_due' => $newVersion->fresh()->next_retraining_due,
+                    ]);
+                } else {
+                    $promotionReason = $lockedChampion
+                        ? "Not better than champion: MAPE {$newVersion->mape}% vs {$lockedChampion->mape}%, R² {$newVersion->r2_score} vs {$lockedChampion->r2_score}"
+                        : "No champion exists but new model metrics are unusable";
+
+                    Log::info("New model not promoted", [
+                        'version'       => $newVersion->version,
+                        'new_mape'      => $newVersion->mape,
+                        'new_r2'        => $newVersion->r2_score,
+                        'champion_mape' => $lockedChampion?->mape,
+                        'champion_r2'   => $lockedChampion?->r2_score,
+                        'reason'        => $promotionReason,
+                    ]);
+                }
             }
 
             return [
@@ -172,42 +190,90 @@ class ModelRetrainingService
      */
     private function prepareTrainingData(): array
     {
-        // Get aggregated monthly data for the last 24 months
-        $startDate = Carbon::now()->subMonths(24)->startOfMonth();
-        $endDate = Carbon::now()->subMonth()->endOfMonth();
+        // Get earliest available historical data
+        $oldestDataDate = HistoricalOccupancyData::min('date');
 
-        $roomTypes = RoomType::where('is_active', true)->pluck('id', 'code');
+        if (!$oldestDataDate) {
+            return []; // No data available
+        }
 
-        $monthlyData = HistoricalOccupancyData::selectRaw("
-                strftime('%Y-%m', date) as month,
+        // Use ALL available historical data (full dataset from first upload onward).
+        // More data = better long-term pattern learning for LSTM.
+        // Retraining is done once a year, so the full dataset grows incrementally each cycle.
+        $startDate = Carbon::parse($oldestDataDate)->startOfMonth();
+        $endDate   = HistoricalOccupancyData::max('date')
+            ? Carbon::parse(HistoricalOccupancyData::max('date'))->endOfMonth()
+            : Carbon::now()->subMonth()->endOfMonth();
+
+        // Pre-load room type code map to avoid N+1 queries in the loop below
+        $roomTypeMap = RoomType::where('is_active', true)->pluck('code', 'id');
+
+        // Fetch raw daily rows and aggregate in PHP (portable across SQLite / MySQL / Postgres)
+        $rawData = HistoricalOccupancyData::selectRaw('
+                date,
                 room_type_id,
-                AVG(occupancy_rate) as avg_occupancy,
-                SUM(rooms_occupied) as total_occupied,
-                SUM(revenue) as total_revenue,
-                COUNT(*) as days_count
-            ")
+                occupancy_rate,
+                rooms_occupied,
+                revenue
+            ')
             ->whereBetween('date', [$startDate, $endDate])
-            ->groupBy('month', 'room_type_id')
-            ->orderBy('month')
+            ->orderBy('date')
             ->get();
 
-        // Transform to training format
+        // Group by (year-month, room_type_id) in PHP
+        $grouped = [];
+        foreach ($rawData as $row) {
+            $month  = substr($row->date, 0, 7); // "YYYY-MM"
+            $key    = $month . '|' . $row->room_type_id;
+
+            if (!isset($grouped[$key])) {
+                $grouped[$key] = [
+                    'month'        => $month,
+                    'room_type_id' => $row->room_type_id,
+                    'occ_sum'      => 0,
+                    'rooms_sum'    => 0,
+                    'revenue_sum'  => 0,
+                    'days_count'   => 0,
+                ];
+            }
+
+            $grouped[$key]['occ_sum']   += $row->occupancy_rate;
+            $grouped[$key]['rooms_sum'] += $row->rooms_occupied;
+            $grouped[$key]['revenue_sum'] += $row->revenue;
+            $grouped[$key]['days_count']++;
+        }
+
+        // Transform to training format — no N+1, using pre-loaded map
         $trainingData = [];
-        foreach ($monthlyData as $record) {
-            $roomType = RoomType::find($record->room_type_id);
-            
+        foreach ($grouped as $record) {
+            $daysCount = max($record['days_count'], 1);
             $trainingData[] = [
-                'month' => $record->month,
-                'room_type_code' => $roomType?->code ?? 'UNK',
-                'room_type_id' => $record->room_type_id,
-                'avg_occupancy' => round($record->avg_occupancy, 2),
-                'total_occupied' => $record->total_occupied,
-                'total_revenue' => $record->total_revenue,
-                'days_count' => $record->days_count,
+                'month'          => $record['month'],
+                'room_type_code' => $roomTypeMap[$record['room_type_id']] ?? 'UNK',
+                'room_type_id'   => $record['room_type_id'],
+                'avg_occupancy'  => round($record['occ_sum'] / $daysCount, 2),
+                'total_occupied' => $record['rooms_sum'],
+                'total_revenue'  => $record['revenue_sum'],
+                'days_count'     => $record['days_count'],
             ];
         }
 
+        // Sort by month ascending (important for LSTM sequence building)
+        usort($trainingData, fn($a, $b) => strcmp($a['month'], $b['month']));
+
         return $trainingData;
+    }
+
+    /**
+     * Common headers for Flask API calls — includes API key if configured.
+     */
+    private function flaskHeaders(): array
+    {
+        $headers = ['Content-Type' => 'application/json'];
+        if ($this->flaskApiKey) {
+            $headers['X-API-Key'] = $this->flaskApiKey;
+        }
+        return $headers;
     }
 
     /**
@@ -217,10 +283,13 @@ class ModelRetrainingService
     {
         try {
             $response = Http::timeout(300) // 5 minute timeout
+                ->withHeaders($this->flaskHeaders())
                 ->post("{$this->flaskApiUrl}/api/retrain", [
                     'training_data' => $trainingData,
                     'model_type' => $modelType,
                     'incremental' => true,
+                    // Set RETRAIN_TEST_MODE=true in .env to simulate training without modifying real weights
+                    'test_mode' => (bool) env('RETRAIN_TEST_MODE', false),
                 ]);
 
             if (!$response->successful()) {
@@ -266,7 +335,7 @@ class ModelRetrainingService
         $newVersion = ModelVersion::create([
             'version' => ModelVersion::getNextVersion($modelType),
             'model_type' => $modelType,
-            'model_path' => storage_path('app/models/simulated_' . $modelType . '_' . time() . '.h5'),
+            'model_path' => '', // Simulated — no real file on disk
             'mape' => rand(15, 35) + (rand(0, 99) / 100), // Random MAPE between 15-35%
             'r2_score' => rand(70, 95) / 100, // Random R² between 0.70-0.95
             'rmse' => rand(5, 15) / 100,
@@ -285,19 +354,18 @@ class ModelRetrainingService
             $newVersion->promoteToChampion();
             $promoted = true;
 
-            // Mark retraining completed and schedule next retraining (6-month cycle)
             $retrainingScheduler = app(RetrainingScheduler::class);
             $retrainingScheduler->markRetrainingCompleted($newVersion);
         }
 
         return [
-            'success' => true,
-            'version' => $newVersion->version,
-            'mape' => $newVersion->mape,
-            'r2_score' => $newVersion->r2_score,
-            'promoted' => $promoted,
-            'improvement' => $newVersion->getImprovementOver($currentChampion),
-            'simulated' => true,
+            'success'             => true,
+            'version'             => $newVersion->version,
+            'mape'                => $newVersion->mape,
+            'r2_score'            => $newVersion->r2_score,
+            'promoted'            => $promoted,
+            'improvement'         => $newVersion->getImprovementOver($currentChampion),
+            'simulated'           => true,
             'next_retraining_due' => $promoted ? $newVersion->fresh()->next_retraining_due : null,
         ];
     }
@@ -326,15 +394,17 @@ class ModelRetrainingService
 
         return [
             'single' => $single ? [
-                'version' => $single->version,
-                'mape' => (float) $single->mape,
-                'r2_score' => (float) $single->r2_score,
+                'version'    => $single->version,
+                'mape'       => round((float) $single->mape, 2),
+                'accuracy'   => round(100 - (float) $single->mape, 2),
+                'r2_score'   => round((float) $single->r2_score, 4),
                 'created_at' => $single->created_at->toDateTimeString(),
             ] : null,
             'multi' => $multi ? [
-                'version' => $multi->version,
-                'mape' => (float) $multi->mape,
-                'r2_score' => (float) $multi->r2_score,
+                'version'    => $multi->version,
+                'mape'       => round((float) $multi->mape, 2),
+                'accuracy'   => round(100 - (float) $multi->mape, 2),
+                'r2_score'   => round((float) $multi->r2_score, 4),
                 'created_at' => $multi->created_at->toDateTimeString(),
             ] : null,
         ];

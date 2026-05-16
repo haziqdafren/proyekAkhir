@@ -1,304 +1,177 @@
 <template>
   <DashboardLayout>
-    <div class="p-8 space-y-8 max-w-[1600px] mx-auto">
-      <!-- Header -->
-      <div class="bg-gradient-to-br from-primary to-primary-dark rounded-3xl shadow-md overflow-hidden">
-        <div class="relative px-10 py-12">
-          <div class="absolute inset-0 bg-grid-white/[0.02] bg-[size:32px_32px]"></div>
-          <div class="absolute right-0 top-0 -mt-8 -mr-20 h-72 w-72 rounded-full bg-white/5 blur-3xl"></div>
+    <div class="h-full flex flex-col px-6 py-3 gap-2 overflow-hidden">
 
-          <div class="relative">
-            <div class="flex items-center space-x-3 mb-4">
-              <div class="p-3 bg-white/10 rounded-2xl">
-                <svg class="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-              </div>
-              <h1 class="text-3xl font-semibold text-white">Ekspor Laporan</h1>
-            </div>
-            <p class="text-white/80 text-base font-normal max-w-2xl">
-              Export data hasil prediksi okupansi dalam format Excel, CSV, atau PDF untuk analisis lebih lanjut
-            </p>
-          </div>
+      <!-- Page Header -->
+      <div class="bg-primary-dark rounded-2xl px-5 py-2.5 shadow-card flex items-center justify-between flex-shrink-0">
+        <div>
+          <h1 class="text-base font-bold text-white leading-tight">Ekspor Laporan</h1>
+          <p class="text-xs text-white/60 mt-0.5">Unduh data prediksi dalam format yang Anda butuhkan</p>
         </div>
       </div>
 
-      <!-- Export Templates -->
-      <div class="bg-white rounded-3xl shadow-sm border border-surface/30 overflow-hidden">
-        <div class="px-8 py-6 border-b border-surface/30">
-          <h2 class="text-xl font-semibold text-primary-dark">Template Laporan</h2>
-          <p class="text-sm text-gray-500 mt-1">Pilih jenis laporan yang ingin di-export</p>
+      <!-- No predictions warning -->
+      <div v-if="availablePredictions.length === 0" class="bg-white rounded-2xl border border-amber-200 p-4 flex items-center gap-3 flex-shrink-0">
+        <div class="w-8 h-8 bg-amber-100 rounded-xl flex items-center justify-center flex-shrink-0">
+          <svg class="w-4 h-4 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
         </div>
+        <p class="text-sm text-amber-700">Belum ada data prediksi. Buat prediksi di <a href="/predictions" class="font-bold underline">halaman Prediksi</a> terlebih dahulu.</p>
+      </div>
 
-        <div class="p-8">
-          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            <div
-              v-for="template in exportTemplates"
-              :key="template.id"
-              @click="selectTemplate(template)"
-              class="group relative p-6 rounded-2xl border-2 border-surface/40 hover:border-primary/50 transition-all duration-300 hover:shadow-lg hover:-translate-y-1 cursor-pointer"
-              :class="{ 'border-primary bg-primary/5': selectedTemplate?.id === template.id }"
+      <!-- 2-column layout -->
+      <div class="grid grid-cols-[1fr_1.4fr] gap-2 items-start">
+
+        <!-- LEFT COLUMN: Template + Format -->
+        <div class="flex flex-col gap-2 min-h-0 items-start">
+
+          <!-- Report type tabs (vertical) -->
+          <div class="bg-white rounded-2xl border border-surface/30 shadow-card-md p-1 flex flex-col gap-0.5 flex-shrink-0 w-full">
+            <button
+              v-for="t in exportTemplates"
+              :key="t.id"
+              @click="selectTemplate(t.id)"
+              class="w-full px-3 py-2 rounded-xl text-sm font-semibold transition-all text-left"
+              :class="selectedTemplateId === t.id
+                ? 'bg-primary text-white shadow-sm'
+                : 'text-gray-500 hover:bg-surface/50 hover:text-primary-dark'"
             >
-              <div class="flex items-start justify-between mb-5">
-                <div
-                  class="p-4 rounded-2xl transition-transform duration-300 group-hover:scale-110"
-                  :class="selectedTemplate?.id === template.id ? 'bg-primary/10' : 'bg-surface/50'"
-                >
-                  <svg
-                    class="w-7 h-7 transition-colors"
-                    :class="selectedTemplate?.id === template.id ? 'text-primary' : 'text-gray-600'"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                    stroke-width="1.5"
-                  >
-                    <path v-if="template.icon === 'chart'" stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                    <path v-else-if="template.icon === 'document'" stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    <path v-else-if="template.icon === 'documents'" stroke-linecap="round" stroke-linejoin="round" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" />
-                    <path v-else stroke-linecap="round" stroke-linejoin="round" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
-                  </svg>
-                </div>
-
-                <div v-if="selectedTemplate?.id === template.id" class="p-1.5 bg-primary rounded-full">
-                  <svg class="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
-                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
-                  </svg>
-                </div>
-              </div>
-
-              <div class="space-y-2">
-                <h3 class="text-lg font-semibold text-primary-dark">{{ template.name }}</h3>
-                <p class="text-sm text-gray-600 leading-relaxed">{{ template.description }}</p>
-              </div>
-
-              <div class="mt-5 pt-5 border-t border-surface/30">
-                <div class="flex flex-wrap gap-2">
-                  <span
-                    v-for="format in template.format"
-                    :key="format"
-                    class="inline-flex items-center px-3 py-1 rounded-lg text-xs font-semibold bg-surface/40 text-gray-700"
-                  >
-                    {{ format.toUpperCase() }}
-                  </span>
-                </div>
-              </div>
-            </div>
+              {{ t.name }}
+            </button>
           </div>
-        </div>
-      </div>
 
-      <!-- Export Configuration -->
-      <div v-if="selectedTemplate" class="bg-white rounded-3xl shadow-sm border border-surface/30 overflow-hidden">
-        <div class="px-8 py-6 border-b border-surface/30">
-          <h2 class="text-xl font-semibold text-primary-dark">Konfigurasi Export</h2>
-          <p class="text-sm text-gray-500 mt-1">Sesuaikan parameter export sesuai kebutuhan</p>
-        </div>
-
-        <div class="p-8">
-          <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            <!-- Left Column -->
-            <div class="space-y-6">
-              <!-- Format Selection -->
-              <div class="space-y-3">
-                <label class="text-sm font-semibold text-primary-dark">Format File</label>
-                <div class="grid grid-cols-2 gap-3">
-                  <button
-                    v-for="format in selectedTemplate.format"
-                    :key="format"
-                    @click="exportConfig.format = format"
-                    class="px-5 py-3.5 rounded-2xl border-2 text-sm font-semibold transition-all duration-200"
-                    :class="exportConfig.format === format
-                      ? 'border-primary bg-primary text-white'
-                      : 'border-surface/50 bg-background text-gray-700 hover:border-primary/30'"
-                  >
-                    {{ format.toUpperCase() }}
-                  </button>
-                </div>
-              </div>
-
-              <!-- Available Predictions Selection -->
-              <div class="space-y-3">
-                <label class="text-sm font-semibold text-primary-dark">Pilih Data Prediksi</label>
-                <p v-if="isMultiSelectMode" class="text-xs text-gray-500 -mt-1">
-                  Pilih satu atau lebih prediksi untuk di-export
-                </p>
-                <div v-if="filteredPredictions.length > 0" class="space-y-2 max-h-64 overflow-y-auto pr-2">
-                  <!-- Select All option for multi-select mode -->
-                  <label
-                    v-if="isMultiSelectMode"
-                    class="flex items-center justify-between p-4 rounded-2xl border-2 cursor-pointer transition-all duration-200"
-                    :class="isAllPredictionsSelected
-                      ? 'border-primary bg-primary/5'
-                      : 'border-surface/50 hover:border-primary/30 hover:bg-surface/20'"
-                  >
-                    <input
-                      type="checkbox"
-                      :checked="isAllPredictionsSelected"
-                      @change="toggleAllPredictions"
-                      class="w-5 h-5 rounded-lg border-gray-300 text-primary focus:ring-primary/30"
-                    />
-                    <div class="ml-3 flex-1">
-                      <span class="text-sm font-semibold text-primary-dark">Pilih Semua Prediksi</span>
-                      <p class="text-xs text-gray-500 mt-1">{{ filteredPredictions.length }} periode tersedia</p>
-                    </div>
-                  </label>
-                  
-                  <!-- Multi-select checkboxes for prediction_report -->
-                  <template v-if="isMultiSelectMode">
-                    <label
-                      v-for="prediction in filteredPredictions"
-                      :key="`${prediction.month}-${prediction.model_type}`"
-                      class="flex items-center justify-between p-4 rounded-2xl border-2 cursor-pointer transition-all duration-200"
-                      :class="isPredictionSelected(prediction)
-                        ? 'border-primary bg-primary/5'
-                        : 'border-surface/50 hover:border-primary/30 hover:bg-surface/20'"
-                    >
-                      <input
-                        type="checkbox"
-                        :value="getPredictionKey(prediction)"
-                        v-model="exportConfig.selected_predictions"
-                        class="w-5 h-5 rounded-lg border-gray-300 text-primary focus:ring-primary/30"
-                      />
-                      <div class="ml-3 flex-1">
-                        <div class="flex items-center justify-between">
-                          <span class="text-sm font-semibold text-primary-dark">{{ prediction.label }}</span>
-                          <span class="text-xs font-semibold px-2.5 py-1 rounded-lg"
-                            :class="prediction.model_type === 'single' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'"
-                          >
-                            {{ prediction.model_label }}
-                          </span>
-                        </div>
-                        <p class="text-xs text-gray-500 mt-1">{{ prediction.count }} prediksi tersedia</p>
-                      </div>
-                    </label>
-                  </template>
-                  
-                  <!-- Single-select radio for other templates -->
-                  <template v-else>
-                    <label
-                      v-for="prediction in filteredPredictions"
-                      :key="`${prediction.month}-${prediction.model_type}`"
-                      class="flex items-center justify-between p-4 rounded-2xl border-2 cursor-pointer transition-all duration-200"
-                      :class="exportConfig.selected_prediction?.month === prediction.month && exportConfig.selected_prediction?.model_type === prediction.model_type
-                        ? 'border-primary bg-primary/5'
-                        : 'border-surface/50 hover:border-primary/30 hover:bg-surface/20'"
-                    >
-                      <input
-                        type="radio"
-                        name="prediction_selection"
-                        :value="prediction"
-                        v-model="exportConfig.selected_prediction"
-                        class="w-5 h-5 text-primary focus:ring-primary/30"
-                      />
-                      <div class="ml-3 flex-1">
-                        <div class="flex items-center justify-between">
-                          <span class="text-sm font-semibold text-primary-dark">{{ prediction.label }}</span>
-                          <span class="text-xs font-semibold px-2.5 py-1 rounded-lg"
-                            :class="prediction.model_type === 'single' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'"
-                          >
-                            {{ prediction.model_label }}
-                          </span>
-                        </div>
-                        <p class="text-xs text-gray-500 mt-1">{{ prediction.count }} prediksi tersedia</p>
-                      </div>
-                    </label>
-                  </template>
-                </div>
-                <div v-else class="p-6 rounded-2xl bg-orange-50 border border-orange-200">
-                  <div class="flex items-start space-x-3">
-                    <svg class="w-5 h-5 text-orange-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                    </svg>
-                    <div>
-                      <p class="text-sm font-semibold text-orange-800">Tidak Ada Data Prediksi</p>
-                      <p class="text-xs text-orange-600 mt-1">Silakan generate prediksi terlebih dahulu di halaman Detail Prediksi</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Room Type Selection -->
-              <div class="space-y-3">
-                <label class="text-sm font-semibold text-primary-dark">Tipe Kamar</label>
-                <div class="space-y-2">
-                  <label class="flex items-center p-4 rounded-2xl border border-surface/50 cursor-pointer hover:bg-surface/20 transition-colors">
-                    <input
-                      type="checkbox"
-                      :checked="isAllRoomsSelected"
-                      @change="toggleAllRooms"
-                      class="w-5 h-5 rounded-lg border-gray-300 text-primary focus:ring-primary/30"
-                    />
-                    <span class="ml-3 text-sm font-medium text-gray-700">Semua Tipe Kamar</span>
-                  </label>
-
-                  <label
-                    v-for="roomType in roomTypes"
-                    :key="roomType.id"
-                    class="flex items-center p-4 rounded-2xl border border-surface/50 cursor-pointer hover:bg-surface/20 transition-colors"
-                  >
-                    <input
-                      type="checkbox"
-                      :value="roomType.id"
-                      v-model="exportConfig.room_types"
-                      class="w-5 h-5 rounded-lg border-gray-300 text-primary focus:ring-primary/30"
-                    />
-                    <span class="ml-3 text-sm font-medium text-gray-700">{{ roomType.name }}</span>
-                  </label>
-                </div>
-              </div>
+          <!-- Format File -->
+          <div v-if="selectedTemplate" class="bg-white rounded-2xl border border-surface/30 shadow-card-md overflow-hidden flex-shrink-0 w-full">
+            <div class="px-4 py-2.5 border-b border-surface/20">
+              <h2 class="text-xs font-bold text-primary-dark uppercase tracking-wide">Format File</h2>
             </div>
-
-            <!-- Right Column -->
-            <div class="space-y-6">
-              <!-- Preview Info -->
-              <div class="p-6 rounded-2xl bg-primary/5 border border-primary/20">
-                <div class="flex items-start space-x-3">
-                  <div class="p-2 bg-primary/10 rounded-xl">
-                    <svg class="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                  </div>
-                  <div class="flex-1">
-                    <h4 class="text-sm font-semibold text-primary-dark mb-2">Informasi Export</h4>
-                    <div class="space-y-1.5 text-xs text-gray-600">
-                      <p><span class="font-medium">Template:</span> {{ selectedTemplate.name }}</p>
-                      <p><span class="font-medium">Format:</span> {{ exportConfig.format.toUpperCase() }}</p>
-                      <!-- Multi-select info -->
-                      <template v-if="isMultiSelectMode">
-                        <p><span class="font-medium">Prediksi Dipilih:</span> {{ exportConfig.selected_predictions.length }} periode</p>
-                        <p v-if="selectedPredictionsInfo.length > 0" class="ml-2 text-gray-500">
-                          {{ selectedPredictionsInfo.slice(0, 3).join(', ') }}
-                          <span v-if="selectedPredictionsInfo.length > 3"> +{{ selectedPredictionsInfo.length - 3 }} lainnya</span>
-                        </p>
-                      </template>
-                      <!-- Single-select info -->
-                      <template v-else>
-                        <p v-if="exportConfig.selected_prediction"><span class="font-medium">Periode:</span> {{ exportConfig.selected_prediction.label }}</p>
-                        <p v-if="exportConfig.selected_prediction"><span class="font-medium">Model:</span> {{ exportConfig.selected_prediction.model_label }}</p>
-                      </template>
-                      <p><span class="font-medium">Kamar:</span> {{ exportConfig.room_types.length > 0 ? exportConfig.room_types.length + ' tipe' : 'Semua' }}</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Export Button -->
+            <div class="p-2 flex gap-1.5">
               <button
-                @click="handleExport"
-                :disabled="isExporting"
-                class="w-full px-6 py-4 bg-primary hover:bg-primary-dark text-white font-semibold rounded-2xl shadow-sm hover:shadow-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-3"
+                v-for="fmt in selectedTemplate.format"
+                :key="fmt"
+                @click="exportConfig.format = fmt"
+                class="flex-1 py-1.5 rounded-xl text-sm font-semibold border-2 transition-all"
+                :class="exportConfig.format === fmt
+                  ? 'border-primary bg-primary text-white'
+                  : 'border-surface/40 text-gray-600 hover:border-primary/30'"
               >
-                <svg v-if="!isExporting" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                <svg v-else class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                <span>{{ isExporting ? 'Membuat Export...' : 'Export Laporan' }}</span>
+                {{ fmt === 'excel' ? 'Excel' : fmt === 'pdf' ? 'PDF' : fmt.toUpperCase() }}
               </button>
             </div>
           </div>
+
+          <!-- Empty state -->
+          <div v-if="!selectedTemplate" class="bg-white rounded-2xl border border-surface/30 shadow-card-md w-full py-6 flex flex-col items-center justify-center gap-2 text-center px-4">
+            <svg class="w-6 h-6 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M15.042 21.672L13.684 16.6m0 0l-2.51 2.225.569-9.47 5.227 7.917-3.286-.672zM12 2.25V4.5m5.834.166l-1.591 1.591M20.25 10.5H18M7.757 14.743l-1.59 1.59M6 10.5H3.75m4.007-4.243l-1.59-1.59" />
+            </svg>
+            <p class="text-xs font-semibold text-gray-400">Pilih jenis laporan</p>
+          </div>
+
+        </div>
+
+        <!-- RIGHT COLUMN: Periode + Tipe Kamar + Ringkasan -->
+        <div class="flex flex-col gap-2">
+
+          <template v-if="selectedTemplate">
+
+            <!-- Pilih Prediksi -->
+            <div class="bg-white rounded-2xl border border-surface/30 shadow-card-md overflow-hidden flex-shrink-0">
+              <div class="px-4 py-2 border-b border-surface/20 flex items-center justify-between">
+                <h2 class="text-xs font-bold text-primary-dark uppercase tracking-wide">Pilih Periode Prediksi</h2>
+                <span v-if="exportConfig.selected_predictions.length > 0" class="px-2 py-0.5 bg-primary/10 text-primary text-xs font-bold rounded-lg">
+                  {{ exportConfig.selected_predictions.length }} dipilih
+                </span>
+              </div>
+
+              <div v-if="filteredPredictions.length > 0">
+                <!-- Select all -->
+                <label class="flex items-center gap-2 px-4 py-1.5 bg-gray-50 border-b border-surface/20 cursor-pointer hover:bg-gray-100 transition-colors">
+                  <input type="checkbox" :checked="isAllPredictionsSelected" @change="toggleAllPredictions"
+                    class="w-3 h-3 rounded border-gray-300 text-primary focus:ring-primary/30" />
+                  <span class="text-xs font-semibold text-primary-dark">Pilih Semua ({{ filteredPredictions.length }} periode)</span>
+                </label>
+
+                <!-- Prediction list — max height so it scrolls if many months -->
+                <div class="max-h-48 overflow-y-auto divide-y divide-surface/10">
+                  <label
+                    v-for="prediction in filteredPredictions"
+                    :key="`${prediction.month}-${prediction.model_type}`"
+                    class="flex items-center gap-2 px-4 py-1.5 cursor-pointer hover:bg-surface/20 transition-colors"
+                    :class="isPredictionSelected(prediction) ? 'bg-primary/5' : ''"
+                  >
+                    <input type="checkbox" :value="getPredictionKey(prediction)" v-model="exportConfig.selected_predictions"
+                      class="w-3 h-3 rounded border-gray-300 text-primary focus:ring-primary/30 flex-shrink-0" />
+                    <span class="text-xs font-medium text-primary-dark truncate">{{ prediction.label }}</span>
+                    <span class="text-[10px] text-gray-400 ml-auto flex-shrink-0 bg-surface/50 px-1.5 py-0.5 rounded-md">{{ prediction.model_type === 'single' ? 'Overall' : 'Per Kamar' }}</span>
+                  </label>
+                </div>
+              </div>
+
+              <div v-else class="px-4 py-4 text-center text-xs text-gray-400">
+                Tidak ada prediksi tersedia untuk jenis laporan ini
+              </div>
+            </div>
+
+            <!-- Tipe Kamar -->
+            <div v-if="roomTypes.length > 0" class="bg-white rounded-2xl border border-surface/30 shadow-card-md overflow-hidden flex-shrink-0">
+              <div class="px-4 py-2.5 border-b border-surface/20">
+                <h2 class="text-xs font-bold text-primary-dark uppercase tracking-wide">Tipe Kamar <span class="text-[10px] font-normal text-gray-400 ml-1">— opsional, kosong = semua</span></h2>
+              </div>
+              <div class="px-3 py-2 grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                <label
+                  v-for="roomType in roomTypes"
+                  :key="roomType.id"
+                  class="flex items-center gap-2 px-3 py-2 border-2 rounded-xl cursor-pointer transition-all"
+                  :class="exportConfig.room_types.includes(roomType.id)
+                    ? 'border-primary bg-primary/5'
+                    : 'border-surface/30 hover:border-primary/30'"
+                >
+                  <input
+                    type="checkbox"
+                    :value="roomType.id"
+                    v-model="exportConfig.room_types"
+                    class="w-3.5 h-3.5 rounded border-gray-300 text-primary focus:ring-primary/30"
+                  />
+                  <span class="text-xs font-medium text-gray-700">{{ roomType.name }}</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Export Summary + Button -->
+            <div class="bg-white rounded-2xl border border-surface/30 shadow-card-md px-4 py-3 flex items-center gap-4 flex-shrink-0">
+              <div class="flex-1 min-w-0">
+                <p class="text-[10px] text-gray-400 font-medium uppercase tracking-wide mb-0.5">Ringkasan Ekspor</p>
+                <p class="text-xs font-semibold text-primary-dark truncate">
+                  {{ selectedTemplate?.name }}
+                  <span class="text-gray-400 font-normal"> · {{ exportConfig.format === 'excel' ? 'Excel (.xlsx)' : exportConfig.format === 'pdf' ? 'PDF (.pdf)' : exportConfig.format.toUpperCase() }}</span>
+                  <span class="text-gray-400 font-normal"> · {{ exportConfig.selected_predictions.length }} periode</span>
+                </p>
+              </div>
+              <button
+                @click="handleExport"
+                :disabled="isExporting || exportConfig.selected_predictions.length === 0"
+                class="flex-shrink-0 flex items-center gap-2 px-5 py-2.5 bg-primary hover:bg-primary-dark text-white font-bold rounded-xl shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+              >
+                <svg v-if="!isExporting" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                <svg v-else class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                {{ isExporting ? 'Mengunduh...' : 'Ekspor Sekarang' }}
+              </button>
+            </div>
+
+          </template>
+
+          <!-- Empty state kanan -->
+          <div v-if="!selectedTemplate" class="bg-white rounded-2xl border border-surface/30 shadow-card-md py-10 flex items-center justify-center">
+            <p class="text-xs text-gray-400">Pilih jenis laporan di sebelah kiri</p>
+          </div>
+
         </div>
       </div>
 
@@ -315,135 +188,76 @@ import axios from 'axios';
 const toast = useToast();
 
 const props = defineProps({
-  roomTypes: {
-    type: Array,
-    default: () => []
-  },
-  availablePredictions: {
-    type: Array,
-    default: () => []
-  },
-  exportTemplates: {
-    type: Array,
-    default: () => []
-  },
+  roomTypes: { type: Array, default: () => [] },
+  availablePredictions: { type: Array, default: () => [] },
+  exportTemplates: { type: Array, default: () => [] },
 });
 
-const selectedTemplate = ref(null);
+const selectedTemplateId = ref('');
 const isExporting = ref(false);
 
 const exportConfig = ref({
   format: 'excel',
-  selected_prediction: null,       // For single-select templates
-  selected_predictions: [],        // For multi-select templates (prediction_report)
+  selected_predictions: [],
   room_types: [],
 });
 
-// Filter predictions based on selected template
+const selectedTemplate = computed(() =>
+  props.exportTemplates.find(t => t.id === selectedTemplateId.value) || null
+);
+
+const selectTemplate = (id) => {
+  selectedTemplateId.value = id;
+  if (selectedTemplate.value) {
+    exportConfig.value.format = selectedTemplate.value.format[0];
+  }
+  exportConfig.value.selected_predictions = [];
+  exportConfig.value.room_types = [];
+};
+
 const filteredPredictions = computed(() => {
   if (!selectedTemplate.value) return props.availablePredictions || [];
-
-  const template = selectedTemplate.value.id;
-
-  if (template === 'prediction_single') {
-    return (props.availablePredictions || []).filter(p => p.model_type === 'single');
-  } else if (template === 'prediction_multi') {
-    return (props.availablePredictions || []).filter(p => p.model_type === 'multi');
-  }
-
+  const id = selectedTemplate.value.id;
+  if (id === 'prediction_single') return (props.availablePredictions || []).filter(p => p.model_type === 'single');
+  if (id === 'prediction_multi')  return (props.availablePredictions || []).filter(p => p.model_type === 'multi');
   return props.availablePredictions || [];
 });
 
-// Check if current template supports multi-selection
-// All templates now support multi-selection
-const isMultiSelectMode = computed(() => {
-  return selectedTemplate.value !== null;
-});
+const getPredictionKey = (prediction) => `${prediction.month}|${prediction.model_type}`;
 
-const selectTemplate = (template) => {
-  selectedTemplate.value = template;
-  exportConfig.value.format = template.format[0]; // Set default format
-  // Reset selections when switching templates
-  exportConfig.value.selected_prediction = null;
-  exportConfig.value.selected_predictions = [];
-};
+const isPredictionSelected = (prediction) =>
+  exportConfig.value.selected_predictions.includes(getPredictionKey(prediction));
 
-// Helper to get a unique key for each prediction
-const getPredictionKey = (prediction) => {
-  return `${prediction.month}|${prediction.model_type}`;
-};
-
-// Check if a prediction is selected (for multi-select)
-const isPredictionSelected = (prediction) => {
-  return exportConfig.value.selected_predictions.includes(getPredictionKey(prediction));
-};
-
-// Check if all predictions are selected
 const isAllPredictionsSelected = computed(() => {
   if (filteredPredictions.value.length === 0) return false;
   return exportConfig.value.selected_predictions.length === filteredPredictions.value.length;
 });
 
-// Toggle all predictions selection
 const toggleAllPredictions = (event) => {
-  if (event.target.checked) {
-    exportConfig.value.selected_predictions = filteredPredictions.value.map(p => getPredictionKey(p));
-  } else {
-    exportConfig.value.selected_predictions = [];
-  }
-};
-
-// Get labels of selected predictions for info display
-const selectedPredictionsInfo = computed(() => {
-  return exportConfig.value.selected_predictions.map(key => {
-    const [month, modelType] = key.split('|');
-    const prediction = filteredPredictions.value.find(
-      p => p.month === month && p.model_type === modelType
-    );
-    return prediction ? `${prediction.label} (${prediction.model_label})` : key;
-  });
-});
-
-const isAllRoomsSelected = computed(() => {
-  if (!props.roomTypes || props.roomTypes.length === 0) return false;
-  return exportConfig.value.room_types.length === props.roomTypes.length;
-});
-
-const toggleAllRooms = (event) => {
-  if (event.target.checked) {
-    exportConfig.value.room_types = props.roomTypes.map(r => r.id);
-  } else {
-    exportConfig.value.room_types = [];
-  }
+  exportConfig.value.selected_predictions = event.target.checked
+    ? filteredPredictions.value.map(p => getPredictionKey(p))
+    : [];
 };
 
 const handleExport = () => {
   if (!selectedTemplate.value) {
-    toast.warning('Silakan pilih template terlebih dahulu');
+    toast.warning('Silakan pilih jenis laporan terlebih dahulu');
     return;
   }
-
-  // Validate selection - always use multi-select mode
   if (exportConfig.value.selected_predictions.length === 0) {
-    toast.warning('Silakan pilih minimal satu data prediksi yang akan di-export');
+    toast.warning('Silakan pilih minimal satu data prediksi');
     return;
   }
 
-  // Build export data - always use multi-select predictions array
   const selectedPredictionData = exportConfig.value.selected_predictions.map(key => {
     const [month, modelType] = key.split('|');
-    const prediction = filteredPredictions.value.find(
-      p => p.month === month && p.model_type === modelType
-    );
-    return prediction ? {
-      month: prediction.month,
-      model_type: prediction.model_type,
-      start_date: prediction.start_date,
-      end_date: prediction.end_date,
-    } : null;
-  }).filter(p => p !== null);
+    const prediction = filteredPredictions.value.find(p => p.month === month && p.model_type === modelType);
+    return prediction
+      ? { month: prediction.month, model_type: prediction.model_type, start_date: prediction.start_date, end_date: prediction.end_date }
+      : null;
+  }).filter(Boolean);
 
-  let exportData = {
+  const exportData = {
     template_id: selectedTemplate.value.id,
     format: exportConfig.value.format,
     room_types: exportConfig.value.room_types.length > 0 ? exportConfig.value.room_types : null,
@@ -452,71 +266,44 @@ const handleExport = () => {
 
   isExporting.value = true;
 
-  // Get CSRF token from meta tag
   const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content;
-
   if (!csrfToken) {
     toast.error('CSRF token tidak ditemukan. Silakan refresh halaman.');
     isExporting.value = false;
     return;
   }
 
-  // Use Axios for automatic CSRF handling
-  axios.post('/export/generate', exportData, {
-    responseType: 'blob',
-  })
+  axios.post('/export/generate', exportData, { responseType: 'blob' })
     .then((response) => {
-      // Get filename from Content-Disposition header if available
       const contentDisposition = response.headers['content-disposition'];
       let filename = 'export.xlsx';
-
       if (contentDisposition) {
-        const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
-        if (filenameMatch && filenameMatch[1]) {
-          filename = filenameMatch[1].replace(/['"]/g, '');
-        }
+        const match = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+        if (match?.[1]) filename = match[1].replace(/['"]/g, '');
       }
-
-      // Create download link
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
       link.setAttribute('download', filename);
       document.body.appendChild(link);
       link.click();
-
-      // Cleanup
       window.URL.revokeObjectURL(url);
       document.body.removeChild(link);
-
       isExporting.value = false;
-      toast.success('Export berhasil! File telah diunduh.');
+      toast.success('Laporan berhasil diunduh!');
     })
     .catch((error) => {
       isExporting.value = false;
-      console.error('Export failed:', error);
-
-      // Try to read error message from blob response
-      if (error.response && error.response.data instanceof Blob) {
+      if (error.response?.data instanceof Blob) {
         const reader = new FileReader();
         reader.onload = () => {
-          try {
-            const errorData = JSON.parse(reader.result);
-            toast.error(errorData.message || 'Terjadi kesalahan saat melakukan export');
-          } catch (e) {
-            toast.error('Terjadi kesalahan saat melakukan export');
-          }
+          try { toast.error(JSON.parse(reader.result).message || 'Terjadi kesalahan saat mengunduh laporan'); }
+          catch { toast.error('Terjadi kesalahan saat mengunduh laporan'); }
         };
         reader.readAsText(error.response.data);
       } else {
-        toast.error(error.response?.data?.message || error.message || 'Terjadi kesalahan saat melakukan export');
+        toast.error(error.response?.data?.message || 'Terjadi kesalahan saat mengunduh laporan');
       }
     });
 };
 </script>
-
-<style>
-.bg-grid-white\/\[0\.02\] {
-  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' width='32' height='32' fill='none' stroke='rgb(255 255 255 / 0.02)'%3e%3cpath d='M0 .5H31.5V32'/%3e%3c/svg%3e");
-}
-</style>

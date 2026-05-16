@@ -112,4 +112,19 @@ return [
 
     'password_timeout' => env('AUTH_PASSWORD_TIMEOUT', 10800),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Manager Credentials (single-user dashboard)
+    |--------------------------------------------------------------------------
+    |
+    | Credentials for the hotel manager account. Using config() instead of
+    | env() directly in code ensures these work after `php artisan config:cache`.
+    |
+    | IMPORTANT: Set MANAGER_PASSWORD to a bcrypt hash in production:
+    |   php artisan tinker → bcrypt('yourpassword')
+    |
+    */
+    'manager_email'    => env('MANAGER_EMAIL', 'manager@dharmahotel.com'),
+    'manager_password' => env('MANAGER_PASSWORD'),
+
 ];

@@ -17,7 +17,7 @@ export default {
             colors: {
                 // Custom palette
                 background: {
-                    DEFAULT: '#F9F7F7',
+                    DEFAULT: '#F0F4F9',
                     light: '#FFFFFF',
                 },
                 surface: {
@@ -42,8 +42,15 @@ export default {
                 },
             },
             spacing: {
+                '14': '3.5rem',
                 '18': '4.5rem',
+                '56': '14rem',
                 '88': '22rem',
+            },
+            boxShadow: {
+                'card':    '0 1px 4px 0 rgba(17,45,78,0.10), 0 1px 2px 0 rgba(17,45,78,0.06)',
+                'card-md': '0 4px 16px -2px rgba(17,45,78,0.14), 0 2px 6px -1px rgba(17,45,78,0.08)',
+                'card-lg': '0 12px 28px -4px rgba(17,45,78,0.18), 0 4px 10px -2px rgba(17,45,78,0.10)',
             },
         },
     },

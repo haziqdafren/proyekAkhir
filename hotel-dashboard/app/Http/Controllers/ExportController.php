@@ -6,6 +6,7 @@ use App\Models\HistoricalOccupancyData;
 use App\Models\Prediction;
 use App\Models\RoomType;
 use App\Exports\PredictionsExport;
+use App\Exports\PredictionsCsvExport;
 use App\Exports\HistoricalDataExport;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -34,48 +35,48 @@ class ExportController extends Controller
                 $date = Carbon::createFromFormat('Y-m', $item->month);
                 return [
                     'month' => $item->month,
-                    'label' => $date->format('F Y'),
+                    'label' => $date->translatedFormat('F Y'),
                     'model_type' => $item->model_type,
-                    'model_label' => $item->model_type === 'single' ? 'Single Output' : 'Multi Output',
+                    'model_label' => $item->model_type === 'single' ? 'Prediksi Keseluruhan Hotel' : 'Prediksi Per Tipe Kamar',
                     'start_date' => $item->start_date,
                     'end_date' => $item->end_date,
                     'count' => $item->prediction_count,
                 ];
             });
 
-        // Get export templates/presets (predictions only)
+        // Get export templates/presets — bahasa manajemen
         $exportTemplates = [
             [
-                'id' => 'prediction_report',
-                'name' => 'Laporan Prediksi Lengkap',
-                'description' => 'Export semua data prediksi okupansi yang telah dihasilkan',
-                'icon' => 'chart',
-                'type' => 'prediction',
-                'format' => ['excel', 'csv', 'pdf'],
+                'id'          => 'prediction_report',
+                'name'        => 'Laporan Prediksi Lengkap',
+                'description' => 'Gabungan prediksi keseluruhan hotel dan per tipe kamar. Berisi: tingkat hunian per bulan, perkiraan kamar terisi, estimasi pendapatan, dan rekomendasi strategi.',
+                'icon'        => 'chart',
+                'type'        => 'prediction',
+                'format'      => ['excel', 'csv', 'pdf'],
             ],
             [
-                'id' => 'prediction_single',
-                'name' => 'Prediksi Single Output',
-                'description' => 'Export hanya hasil prediksi Single Output',
-                'icon' => 'document',
-                'type' => 'prediction',
-                'format' => ['excel', 'csv', 'pdf'],
+                'id'          => 'prediction_single',
+                'name'        => 'Prediksi Tingkat Hunian Keseluruhan',
+                'description' => 'Prediksi total tingkat hunian seluruh hotel. Cocok untuk laporan manajemen, perencanaan pendapatan, dan perkiraan bulanan.',
+                'icon'        => 'document',
+                'type'        => 'prediction',
+                'format'      => ['excel', 'csv', 'pdf'],
             ],
             [
-                'id' => 'prediction_multi',
-                'name' => 'Prediksi Multi Output',
-                'description' => 'Export hanya hasil prediksi Multi Output',
-                'icon' => 'documents',
-                'type' => 'prediction',
-                'format' => ['excel', 'csv', 'pdf'],
+                'id'          => 'prediction_multi',
+                'name'        => 'Prediksi Tingkat Hunian Per Tipe Kamar',
+                'description' => 'Prediksi rinci per tipe kamar: Standard, Superior, Family, Junior Suite. Cocok untuk strategi harga dan pemasaran per segmen.',
+                'icon'        => 'documents',
+                'type'        => 'prediction',
+                'format'      => ['excel', 'csv', 'pdf'],
             ],
             [
-                'id' => 'custom_export',
-                'name' => 'Export Custom',
-                'description' => 'Export data prediksi dengan filter tanggal dan tipe kamar',
-                'icon' => 'database',
-                'type' => 'prediction',
-                'format' => ['excel', 'csv', 'pdf'],
+                'id'          => 'custom_export',
+                'name'        => 'Laporan Kustom',
+                'description' => 'Pilih sendiri bulan, jenis prediksi, dan tipe kamar yang ingin disertakan dalam laporan.',
+                'icon'        => 'database',
+                'type'        => 'prediction',
+                'format'      => ['excel', 'csv', 'pdf'],
             ],
         ];
 
@@ -181,12 +182,16 @@ class ExportController extends Controller
             }
 
             $predictions = $query->get();
-            $pdf = Pdf::loadView('exports.predictions-pdf', compact('predictions'));
+            $pdf = Pdf::loadView('exports.predictions-pdf', compact('predictions'))
+                ->setPaper('a4', 'portrait')
+                ->setOption('defaultFont', 'DejaVu Sans')
+                ->setOption('isHtml5ParserEnabled', true)
+                ->setOption('isRemoteEnabled', false);
             return $pdf->download($filename);
         } elseif ($format === 'excel') {
             return Excel::download(new PredictionsExport($filters), $filename);
         } elseif ($format === 'csv') {
-            return Excel::download(new PredictionsExport($filters), $filename, \Maatwebsite\Excel\Excel::CSV);
+            return Excel::download(new PredictionsCsvExport($filters), $filename, \Maatwebsite\Excel\Excel::CSV);
         }
 
         // For other formats, return error
@@ -211,21 +216,14 @@ class ExportController extends Controller
             ], 400);
         }
 
-        // Build filters for the export class
-        // For multiple predictions, we pass the predictions array directly
         $exportFilters = [
-            'format' => $format,
-            'room_types' => $filters['room_types'] ?? null,
-            'include_charts' => $filters['include_charts'] ?? false,
-            'include_summary' => $filters['include_summary'] ?? false,
-            'include_raw_data' => $filters['include_raw_data'] ?? false,
-            'predictions' => $predictions, // Array of {month, model_type, start_date, end_date}
+            'format'      => $format,
+            'room_types'  => $filters['room_types'] ?? null,
+            'predictions' => $predictions,
         ];
 
         if ($format === 'pdf') {
-            // Build query for PDF with multiple predictions
             $query = Prediction::with('roomType')->orderBy('predicted_for_date');
-
             $query->where(function ($q) use ($predictions) {
                 foreach ($predictions as $prediction) {
                     $q->orWhere(function ($subQ) use ($prediction) {
@@ -235,18 +233,20 @@ class ExportController extends Controller
                     });
                 }
             });
-
             if (!empty($filters['room_types'])) {
                 $query->whereIn('room_type_id', $filters['room_types']);
             }
-
             $predictionData = $query->get();
-            $pdf = Pdf::loadView('exports.predictions-pdf', ['predictions' => $predictionData]);
+            $pdf = Pdf::loadView('exports.predictions-pdf', ['predictions' => $predictionData])
+                ->setPaper('a4', 'portrait')
+                ->setOption('defaultFont', 'DejaVu Sans')
+                ->setOption('isHtml5ParserEnabled', true)
+                ->setOption('isRemoteEnabled', false);
             return $pdf->download($filename);
         } elseif ($format === 'excel') {
             return Excel::download(new PredictionsExport($exportFilters), $filename);
         } elseif ($format === 'csv') {
-            return Excel::download(new PredictionsExport($exportFilters), $filename, \Maatwebsite\Excel\Excel::CSV);
+            return Excel::download(new PredictionsCsvExport($exportFilters), $filename, \Maatwebsite\Excel\Excel::CSV);
         }
 
         return response()->json([

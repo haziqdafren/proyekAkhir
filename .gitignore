@@ -1,0 +1,20 @@
+# OS files
+.DS_Store
+*.DS_Store
+.remember/
+
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+venv/
+
+# Raw SQL/processed data files (kept locally, not needed in repo)
+*.sql
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# Excel temp files
+~$*.xlsx
+~$*.xls

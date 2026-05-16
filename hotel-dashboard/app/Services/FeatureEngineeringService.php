@@ -87,7 +87,7 @@ class FeatureEngineeringService
             $this->calculateYoY($allData, $index), // occ_yoy
             $this->calculateProportion($current, 'std') / 100, // std_proportion (normalized)
             $this->isIncreasing($allData, $index) ? 1.0 : 0.0, // is_increasing
-           $this->isPeakSeason($current->date) ? 1.0 : 0.0, // is_peak_season
+            $this->isPeakSeason($current->date ?? Carbon::now()) ? 1.0 : 0.0, // is_peak_season (with null safety)
             $this->calculateProportion($current, 'js') / 100, // js_proportion
             $this->calculateProportion($current, 'fmy') / 100, // fmy_proportion
             $this->calculateProportion($current, 'spr') / 100, // spr_proportion
@@ -114,35 +114,36 @@ class FeatureEngineeringService
     }
 
     /**
-     * Calculate occupancy momentum (rate of change)
+     * Calculate occupancy momentum (second derivative / rate of change of change).
+     * Matches Python: occ_momentum = (diff1 - diff2) / 100
+     * where diff1 = current - prev, diff2 = prev - prev_prev
      */
     private function calculateMomentum(Collection $data, int $index): float
     {
-        if ($index < 1) return 0.0;
-        
-        $current = $this->getOccupancyRate($data[$index]);
+        if ($index < 2) return 0.0;
+
+        $current  = $this->getOccupancyRate($data[$index]);
         $previous = $this->getOccupancyRate($data[$index - 1]);
-        
-        return ($current - $previous) / 100; // Normalized change
+        $prevPrev = $this->getOccupancyRate($data[$index - 2]);
+
+        $diff1 = $current  - $previous;
+        $diff2 = $previous - $prevPrev;
+
+        return ($diff1 - $diff2) / 100;
     }
 
     /**
-     * Calculate trend (average change over last 3 months)
+     * Calculate trend (simple 1-step month-to-month change).
+     * Matches Python: occ_trend = (current - previous) / 100
      */
     private function calculateTrend(Collection $data, int $index): float
     {
-        if ($index < 2) return 0.0;
-        
-        $changes = [];
-        for ($i = max(0, $index - 2); $i <= $index; $i++) {
-            if ($i > 0) {
-                $curr = $this->getOccupancyRate($data[$i]);
-                $prev = $this->getOccupancyRate($data[$i - 1]);
-                $changes[] = ($curr - $prev) / 100;
-            }
-        }
-        
-        return count($changes) > 0 ? array_sum($changes) / count($changes) : 0.0;
+        if ($index < 1) return 0.0;
+
+        $current  = $this->getOccupancyRate($data[$index]);
+        $previous = $this->getOccupancyRate($data[$index - 1]);
+
+        return ($current - $previous) / 100;
     }
 
     /**
@@ -183,19 +184,19 @@ class FeatureEngineeringService
     }
 
     /**
-     * Calculate year-over-year change
+     * Calculate year-over-year change as absolute difference / 100.
+     * Matches Python: occ_yoy = (current - year_ago) / 100
+     * NOTE: NOT a ratio — this is an absolute occupancy-point diff normalised by 100.
      */
     private function calculateYoY(Collection $data, int $index): float
     {
         $yearAgoIndex = $index - 12;
         if ($yearAgoIndex < 0) return 0.0;
-        
+
         $current = $this->getOccupancyRate($data[$index]);
         $yearAgo = $this->getOccupancyRate($data[$yearAgoIndex]);
-        
-        if ($yearAgo == 0) return 0.0;
-        
-        return ($current - $yearAgo) / $yearAgo; // Percentage change
+
+        return ($current - $yearAgo) / 100;
     }
 
     /**

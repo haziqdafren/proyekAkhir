@@ -1,77 +1,66 @@
 <template>
-  <div v-if="comparisons && comparisons.length > 0" class="bg-white rounded-3xl shadow-sm border border-surface/30 overflow-hidden mb-8">
-    <div class="px-8 py-6 border-b border-surface/30">
-      <h2 class="text-xl font-semibold text-primary-dark">Perbandingan Antar Bulan</h2>
-      <p class="text-sm text-gray-500 mt-1">Tren okupansi dari waktu ke waktu</p>
+  <div v-if="comparisons && comparisons.length > 0" class="bg-white rounded-2xl shadow-sm border border-surface/30 overflow-hidden">
+    <div class="px-5 py-3.5 border-b border-surface/20 flex items-center justify-between">
+      <h2 class="text-sm font-semibold text-primary-dark">Perbandingan Antar Bulan</h2>
+      <span class="text-xs text-gray-400">{{ comparisons.length }} perbandingan</span>
     </div>
 
-    <div class="p-8">
-      <div class="space-y-4">
-        <div
-          v-for="(comparison, index) in comparisons"
-          :key="index"
-          class="flex items-center justify-between p-5 rounded-2xl border-2 transition-all hover:shadow-md"
-          :class="getTrendBorderClass(comparison.trend)"
-        >
-          <!-- Month Names -->
-          <div class="flex items-center gap-4">
-            <div class="text-center">
-              <div class="text-xs text-gray-500 mb-1">Dari</div>
-              <div class="font-semibold text-gray-700">{{ comparison.from_month }}</div>
-              <div class="text-sm text-primary-dark font-bold">{{ comparison.prev_occupancy }}%</div>
-            </div>
+    <div class="divide-y divide-surface/20">
+      <div
+        v-for="(comparison, index) in comparisons"
+        :key="index"
+        class="flex items-center gap-4 px-5 py-3"
+      >
+        <!-- From month -->
+        <div class="flex-shrink-0 w-24 text-right">
+          <p class="text-[10px] text-gray-400">Dari</p>
+          <p class="text-xs font-semibold text-gray-600">{{ comparison.from_month }}</p>
+          <p class="text-sm font-bold text-primary-dark">{{ comparison.prev_occupancy }}%</p>
+        </div>
 
-            <!-- Arrow -->
-            <div>
-              <svg
-                v-if="comparison.trend === 'up'"
-                class="w-8 h-8 text-green-500"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-              </svg>
-              <svg
-                v-else-if="comparison.trend === 'down'"
-                class="w-8 h-8 text-red-500"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6" />
-              </svg>
-              <svg
-                v-else
-                class="w-8 h-8 text-gray-400"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14" />
-              </svg>
-            </div>
+        <!-- Arrow + change badge -->
+        <div class="flex-shrink-0 flex flex-col items-center gap-1">
+          <svg
+            v-if="comparison.trend === 'up'"
+            class="w-5 h-5 text-green-500"
+            fill="none" stroke="currentColor" viewBox="0 0 24 24"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+          </svg>
+          <svg
+            v-else-if="comparison.trend === 'down'"
+            class="w-5 h-5 text-primary"
+            fill="none" stroke="currentColor" viewBox="0 0 24 24"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6" />
+          </svg>
+          <svg
+            v-else
+            class="w-5 h-5 text-gray-400"
+            fill="none" stroke="currentColor" viewBox="0 0 24 24"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14" />
+          </svg>
+          <span
+            class="text-[10px] font-bold px-1.5 py-0.5 rounded"
+            :class="{
+              'bg-green-100 text-green-700':     comparison.trend === 'up',
+              'bg-primary/10 text-primary-dark': comparison.trend === 'down',
+              'bg-gray-100 text-gray-600':       comparison.trend === 'flat',
+            }"
+          >{{ comparison.change > 0 ? '+' : '' }}{{ comparison.change }}%</span>
+        </div>
 
-            <div class="text-center">
-              <div class="text-xs text-gray-500 mb-1">Ke</div>
-              <div class="font-semibold text-gray-700">{{ comparison.to_month }}</div>
-              <div class="text-sm text-primary-dark font-bold">{{ comparison.current_occupancy }}%</div>
-            </div>
-          </div>
+        <!-- To month -->
+        <div class="flex-shrink-0 w-24">
+          <p class="text-[10px] text-gray-400">Ke</p>
+          <p class="text-xs font-semibold text-gray-600">{{ comparison.to_month }}</p>
+          <p class="text-sm font-bold text-primary-dark">{{ comparison.current_occupancy }}%</p>
+        </div>
 
-          <!-- Change Info -->
-          <div class="flex-1 ml-6">
-            <div class="flex items-center gap-3 mb-2">
-              <span
-                class="inline-flex items-center px-3 py-1.5 rounded-xl text-sm font-bold"
-                :class="getTrendBadgeClass(comparison.trend)"
-              >
-                {{ comparison.change > 0 ? '+' : '' }}{{ comparison.change }}%
-                <span class="ml-1 text-xs">({{ comparison.change_percent > 0 ? '+' : '' }}{{ comparison.change_percent }}%)</span>
-              </span>
-            </div>
-            <p class="text-sm text-gray-600">{{ comparison.interpretation }}</p>
-          </div>
+        <!-- Interpretation -->
+        <div class="flex-1 min-w-0 border-l border-surface/30 pl-4">
+          <p class="text-xs text-gray-600 leading-relaxed line-clamp-2">{{ comparison.interpretation }}</p>
         </div>
       </div>
     </div>
@@ -79,29 +68,7 @@
 </template>
 
 <script setup>
-const props = defineProps({
+defineProps({
   comparisons: Array,
 });
-
-const getTrendBorderClass = (trend) => {
-  switch (trend) {
-    case 'up':
-      return 'border-green-200 bg-green-50/30';
-    case 'down':
-      return 'border-red-200 bg-red-50/30';
-    default:
-      return 'border-gray-200 bg-gray-50/30';
-  }
-};
-
-const getTrendBadgeClass = (trend) => {
-  switch (trend) {
-    case 'up':
-      return 'bg-green-100 text-green-700';
-    case 'down':
-      return 'bg-red-100 text-red-700';
-    default:
-      return 'bg-gray-100 text-gray-700';
-  }
-};
 </script>

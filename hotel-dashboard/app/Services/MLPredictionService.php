@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\RoomType;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
@@ -14,9 +15,16 @@ class MLPredictionService
     private string $flaskApiUrl;
 
     /**
-     * Total number of rooms in the hotel
+     * Total rooms — resolved from DB at runtime so room config changes are reflected
      */
-    private const TOTAL_ROOMS = 56;
+    private function getTotalRooms(): int
+    {
+        static $cached = null;
+        if ($cached === null) {
+            $cached = (int) RoomType::where('is_active', true)->sum('total_rooms') ?: 56;
+        }
+        return $cached;
+    }
 
     /**
      * Normalization range used in training
@@ -24,9 +32,21 @@ class MLPredictionService
     private const NORM_MIN = 0;
     private const NORM_MAX = 1;
 
+    private string $flaskApiKey;
+
     public function __construct()
     {
         $this->flaskApiUrl = config('ml.flask_api_url', 'http://127.0.0.1:5000');
+        $this->flaskApiKey = config('ml.flask_api_key', '');
+    }
+
+    private function flaskHeaders(): array
+    {
+        $headers = ['Content-Type' => 'application/json'];
+        if ($this->flaskApiKey) {
+            $headers['X-API-Key'] = $this->flaskApiKey;
+        }
+        return $headers;
     }
 
     /**
@@ -45,7 +65,7 @@ class MLPredictionService
 
         try {
             // Call Flask API
-            $response = Http::timeout(30)->post("{$this->flaskApiUrl}/api/predict", [
+            $response = Http::timeout(30)->withHeaders($this->flaskHeaders())->post("{$this->flaskApiUrl}/api/predict", [
                 'model_type' => 'single',
                 'features' => $features,
             ]);
@@ -62,21 +82,31 @@ class MLPredictionService
 
             // Denormalize the prediction
             $normalizedOccupancy = $result['prediction']['normalized_occupancy'];
-            $actualRooms = $this->denormalize($normalizedOccupancy, 0, self::TOTAL_ROOMS);
+            $actualRooms = $this->denormalize($normalizedOccupancy, 0, $this->getTotalRooms());
             $occupancyRate = $normalizedOccupancy * 100;
+
+            // Get champion model metrics from database
+            $champion = \App\Models\ModelVersion::where('model_type', 'single')
+                ->where('is_champion', true)
+                ->first();
 
             return [
                 'success' => true,
                 'model_type' => 'single',
                 'model_path' => $result['model_path'] ?? 'champion',
+                'model_version' => $champion ? $champion->version : 'v1.0.0',
                 'prediction' => [
                     'rooms_sold' => round($actualRooms, 1),
                     'occupancy_rate' => round($occupancyRate, 2),
                     'normalized_value' => $normalizedOccupancy,
                 ],
-                'confidence' => $result['prediction']['confidence'] ?? ['note' => 'Champion model'],
+                'confidence' => [
+                    'mape' => $champion ? $champion->mape : 0,
+                    'r2' => $champion ? $champion->r2_score : 0,
+                    'note' => 'Champion model metrics'
+                ],
                 'metadata' => [
-                    'total_rooms' => self::TOTAL_ROOMS,
+                    'total_rooms' => $this->getTotalRooms(),
                     'flask_api_url' => $this->flaskApiUrl,
                 ]
             ];
@@ -94,7 +124,7 @@ class MLPredictionService
      * Make prediction using multi-output model (per room type)
      *
      * @param array $features Array of shape [6, 15] - 6 months of 15 features
-     * @param array $roomCapacities ['STD' => 21, 'SPR' => 18, 'FMY' => 10, 'JS' => 9]
+     * @param array $roomCapacities ['STD' => 32, 'SPR' => 19, 'JS' => 2, 'FMY' => 3]
      * @return array Prediction results for all room types
      * @throws RuntimeException
      */
@@ -107,7 +137,7 @@ class MLPredictionService
 
         try {
             // Call Flask API
-            $response = Http::timeout(30)->post("{$this->flaskApiUrl}/api/predict", [
+            $response = Http::timeout(30)->withHeaders($this->flaskHeaders())->post("{$this->flaskApiUrl}/api/predict", [
                 'model_type' => 'multi',
                 'features' => $features,
             ]);
@@ -122,6 +152,14 @@ class MLPredictionService
                 throw new RuntimeException($result['error'] ?? 'Prediction failed');
             }
 
+            // Get champion model metrics from database first
+            $champion = \App\Models\ModelVersion::where('model_type', 'multi')
+                ->where('is_champion', true)
+                ->first();
+
+            $championMape = $champion ? $champion->mape : 0;
+            $championR2 = $champion ? $champion->r2_score : 0;
+
             // Denormalize predictions for each room type
             $roomPredictions = [];
             foreach ($result['predictions'] as $roomType => $prediction) {
@@ -134,6 +172,8 @@ class MLPredictionService
                     'occupancy_rate' => round($normalizedValue * 100, 2),
                     'capacity' => $capacity,
                     'normalized_value' => $normalizedValue,
+                    'mape' => $championMape, // Add MAPE for each prediction
+                    'r2' => $championR2, // Add R² for each prediction
                 ];
             }
 
@@ -141,10 +181,14 @@ class MLPredictionService
                 'success' => true,
                 'model_type' => 'multi',
                 'model_path' => $result['model_path'] ?? 'champion',
+                'model_version' => $champion ? $champion->version : 'v1.0.0',
+                'overall_mape' => $championMape, // Overall MAPE for the model
                 'predictions' => $roomPredictions,
                 'metadata' => [
                     'room_types' => array_keys($roomPredictions),
                     'flask_api_url' => $this->flaskApiUrl,
+                    'mape' => $championMape,
+                    'r2_score' => $championR2,
                 ]
             ];
 
@@ -206,10 +250,10 @@ class MLPredictionService
             ->toArray();
 
         return [
-            'STD' => $roomTypes['STD'] ?? 21,
-            'SPR' => $roomTypes['SPR'] ?? 18,
-            'FMY' => $roomTypes['FMY'] ?? 10,
-            'JS' => $roomTypes['JS'] ?? 9,
+            'STD' => $roomTypes['STD'] ?? 32,
+            'SPR' => $roomTypes['SPR'] ?? 19,
+            'JS'  => $roomTypes['JS']  ?? 2,
+            'FMY' => $roomTypes['FMY'] ?? 3,
         ];
     }
 }

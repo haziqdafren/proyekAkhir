@@ -29,18 +29,22 @@ class SecurityHeaders
         // Enable XSS protection (for older browsers)
         $response->headers->set('X-XSS-Protection', '1; mode=block');
 
-        // Content Security Policy (CSP)
-        // This allows scripts from same origin and Vite's development server
-        $csp = "default-src 'self'; ";
-        $csp .= "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "; // unsafe-inline & unsafe-eval needed for Vite/Vue
-        $csp .= "style-src 'self' 'unsafe-inline' https://fonts.bunny.net; "; // unsafe-inline needed for Tailwind, fonts.bunny.net for external fonts
-        $csp .= "img-src 'self' data: https:; ";
-        $csp .= "font-src 'self' data: https://fonts.bunny.net; "; // Allow fonts from fonts.bunny.net
-        $csp .= "connect-src 'self'; ";
-        $csp .= "form-action 'self'; "; // Allow form submissions to same origin
-        $csp .= "frame-ancestors 'none';";
-
-        $response->headers->set('Content-Security-Policy', $csp);
+        // Content Security Policy — skip entirely in local dev (Vite port changes dynamically).
+        // 'unsafe-inline' is required for script-src because Inertia emits an inline <script>
+        // tag to pass page props. Without it the app breaks (#10).
+        if (!app()->environment('local', 'development')) {
+            $csp = "default-src 'self'; ";
+            $csp .= "script-src 'self' 'unsafe-inline'; ";
+            $csp .= "style-src 'self' 'unsafe-inline' https://fonts.bunny.net; ";
+            $csp .= "connect-src 'self'; ";
+            $csp .= "img-src 'self' data: https:; ";
+            $csp .= "font-src 'self' data: https://fonts.bunny.net; ";
+            $csp .= "form-action 'self'; ";
+            $csp .= "object-src 'none'; ";
+            $csp .= "base-uri 'self'; ";
+            $csp .= "frame-ancestors 'none';";
+            $response->headers->set('Content-Security-Policy', $csp);
+        }
 
         // Strict Transport Security (HSTS) - Only enable in production with HTTPS
         if (config('app.env') === 'production') {

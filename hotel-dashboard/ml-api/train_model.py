@@ -1,369 +1,384 @@
 """
 LSTM Model Training Module
-Handles training new LSTM models for hotel occupancy prediction.
+Replicates the full Data_Hotel.ipynb → ModelLSTM_Single/Multi.ipynb pipeline.
+
+Key insight from 2021_2025_Clean1.xlsx:
+- The Excel has 35 columns: 30 engineered features + 4 room targets + Date
+- ALL values are already MinMaxScaler normalized (0-1)
+- The scaler was fitted on ALL 30 features + targets together on the full dataset
+- The 15 features used by the model are SELECTED from those 30 normalized columns
+
+Retraining pipeline:
+1. Build monthly DataFrame from raw DB data (mirrors Data_Hotel.ipynb aggregation)
+2. Engineer ALL 30 features (not just 15) — same as notebook
+3. Fit MinMaxScaler on the full feature+target matrix (same as notebook)
+4. Select the 15 model features from the normalized matrix
+5. Split 80-10-10 chronologically
+6. Create sequences with create_sequences / create_with_borrow
+7. Train with best hyperparams (patience=30, batch=4)
+8. Evaluate on test set
 """
 
 import os
-import sys
-import json
+import calendar
 import numpy as np
-from pathlib import Path
-from datetime import datetime
 
-# Suppress TensorFlow logging
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Constants — must match notebook exactly
+# ─────────────────────────────────────────────────────────────────────────────
+
+TOTAL_ROOMS = 58   # notebook: TOTAL_ROOMS = 58
+SEQ_LEN     = 6
+
+# 30 feature columns from Data_Hotel.ipynb (in notebook order)
+ALL_FEATURES_30 = [
+    'month_sin', 'month_cos', 'quarter', 'is_peak_season', 'is_low_season',
+    'time_index',
+    'occ_lag_1', 'occ_lag_3', 'occ_lag_6', 'occ_lag_12',
+    'revenue_lag_1', 'revenue_lag_3',
+    'occ_rolling_mean_3', 'occ_rolling_mean_6',
+    'occ_rolling_std_3', 'occ_rolling_std_6',
+    'occ_trend', 'occ_momentum', 'is_increasing',
+    'available_room_nights', 'adr', 'revpar',
+    'std_proportion', 'spr_proportion', 'fmy_proportion', 'js_proportion',
+    'occ_yoy', 'revenue_yoy',
+    'Kamar_Terjual', 'Okupansi_Rate',
+]
+
+# 4 target columns
+TARGETS = ['Kamar_STD', 'Kamar_SPR', 'Kamar_FMY', 'Kamar_JS']
+
+# 15 features selected for the model (from ModelLSTM notebooks)
+FEATURES_15 = [
+    'Kamar_Terjual', 'Okupansi_Rate', 'occ_momentum', 'occ_trend',
+    'occ_rolling_mean_3', 'occ_yoy', 'std_proportion', 'is_increasing',
+    'is_peak_season', 'js_proportion', 'fmy_proportion', 'spr_proportion',
+    'occ_rolling_mean_6', 'occ_rolling_std_3', 'occ_lag_1',
+]
+
+# Best hyperparams from notebook hyperparameter search
+SINGLE_BEST = {'batch': 4, 'lstm1': 32, 'lstm2': 16, 'dropout': 0.3}
+MULTI_BEST  = {'batch': 4, 'lstm1': 32, 'lstm2': 8,  'dropout': 0.2}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Public entry point
+# ─────────────────────────────────────────────────────────────────────────────
+
 def train_lstm_model(training_data: list, model_type: str, output_path: str) -> dict:
-    """
-    Train a new LSTM model with the provided data.
-    
-    Args:
-        training_data: List of training samples from historical_occupancy_data
-        model_type: 'single' or 'multi'
-        output_path: Path to save the trained model
-    
-    Returns:
-        dict with success, metrics, and model info
-    """
     try:
         import tensorflow as tf
         from tensorflow import keras
-        from sklearn.model_selection import train_test_split
         from sklearn.preprocessing import MinMaxScaler
-        
+
         if not training_data:
-            return {
-                'success': False,
-                'error': 'No training data provided'
-            }
-        
-        # Prepare data for LSTM
-        # Expected format: each sample has month, room type, avg_occupancy, etc.
-        X, y = prepare_sequences(training_data, model_type)
-        
-        if X is None or len(X) < 10:
-            return {
-                'success': False,
-                'error': f'Insufficient data for training. Got {len(X) if X is not None else 0} samples, need at least 10.'
-            }
-        
-        # Split data
-        X_train, X_val, y_train, y_val = train_test_split(
-            X, y, test_size=0.2, random_state=42
-        )
-        
-        # Build model based on type
+            return {'success': False, 'error': 'No training data provided'}
+
+        # ── Step 1: Aggregate raw records → one row per month ─────────────────
+        monthly_df = _build_monthly_df(training_data)
+        if monthly_df is None or len(monthly_df) < SEQ_LEN + 4:
+            n = len(monthly_df) if monthly_df is not None else 0
+            return {'success': False,
+                    'error': f'Not enough monthly data: {n} months (need ≥ {SEQ_LEN + 4})'}
+
+        print(f"[train] months in dataset: {len(monthly_df)} "
+              f"({monthly_df['month'].iloc[0]} → {monthly_df['month'].iloc[-1]})")
+
+        # ── Step 2: Engineer ALL 30 features (mirrors Data_Hotel.ipynb) ───────
+        monthly_df = _engineer_all_features(monthly_df)
+
+        # ── Step 3: Build combined matrix [30 features | 4 targets] ──────────
+        all_cols    = ALL_FEATURES_30 + TARGETS
+        raw_matrix  = monthly_df[all_cols].values.astype(np.float64)
+
+        # ── Step 4: Fit MinMaxScaler on the FULL matrix (same as notebook) ────
+        # Notebook: scaler.fit_transform on all 58 rows × 34 cols at once.
+        # For retraining: fit on full available dataset so normalization adapts.
+        scaler       = MinMaxScaler()
+        scaled_full  = scaler.fit_transform(raw_matrix)
+
+        # ── Step 5: Extract 15-feature X and target y from scaled matrix ──────
+        col_index   = {c: i for i, c in enumerate(all_cols)}
+        feat_idx    = [col_index[f] for f in FEATURES_15]
+        target_idx  = [col_index[t] for t in TARGETS]
+
+        X_all = scaled_full[:, feat_idx]                        # (n, 15)
         if model_type == 'single':
-            model = build_single_output_model()
-            output_size = 1
+            # Single output: Kamar_Terjual (index 0 in FEATURES_15)
+            kt_idx = col_index['Kamar_Terjual']
+            y_all  = scaled_full[:, kt_idx:kt_idx+1]           # (n, 1)
         else:
-            model = build_multi_output_model()
-            output_size = 4
-        
-        # Compile
-        model.compile(
-            optimizer=keras.optimizers.Adam(learning_rate=0.001),
-            loss='mse',
-            metrics=['mae']
+            y_all  = scaled_full[:, target_idx]                 # (n, 4)
+
+        n = len(X_all)
+
+        # ── Step 6: Chronological 80-10-10 split ─────────────────────────────
+        train_end = int(n * 0.80)
+        val_end   = int(n * 0.90)
+
+        X_train = X_all[:train_end];          y_train = y_all[:train_end]
+        X_val   = X_all[train_end:val_end];   y_val   = y_all[train_end:val_end]
+        X_test  = X_all[val_end:];            y_test  = y_all[val_end:]
+
+        # ── Step 7: Create LSTM sequences ────────────────────────────────────
+        X_train_seq, y_train_seq = _create_sequences(X_train, y_train)
+        X_val_seq,   y_val_seq   = _create_with_borrow(X_val,   y_val,   X_train)
+        X_test_seq,  y_test_seq  = _create_with_borrow(
+            X_test, y_test, np.vstack([X_train, X_val])
         )
-        
-        # Train with early stopping
-        early_stopping = keras.callbacks.EarlyStopping(
-            monitor='val_loss',
-            patience=10,
-            restore_best_weights=True
-        )
-        
+
+        if len(X_train_seq) < 4:
+            return {'success': False,
+                    'error': f'Too few training sequences: {len(X_train_seq)}'}
+
+        print(f"[train] sequences — train:{len(X_train_seq)} "
+              f"val:{len(X_val_seq)} test:{len(X_test_seq)}")
+
+        # ── Step 8: Build model ───────────────────────────────────────────────
+        tf.random.set_seed(42)
+        np.random.seed(42)
+
+        p = SINGLE_BEST if model_type == 'single' else MULTI_BEST
+        output_units = 1 if model_type == 'single' else 4
+        model = _build_model(p['lstm1'], p['lstm2'], p['dropout'], output_units)
+
+        print(f"[train] hyperparams: batch={p['batch']} lstm1={p['lstm1']} "
+              f"lstm2={p['lstm2']} dropout={p['dropout']}")
+
+        # ── Step 9: Train ─────────────────────────────────────────────────────
+        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+        best_ckpt = output_path + '.ckpt.keras'
+
+        callbacks = [
+            keras.callbacks.ModelCheckpoint(
+                best_ckpt, monitor='val_loss',
+                save_best_only=True, mode='min', verbose=0
+            ),
+            keras.callbacks.EarlyStopping(
+                monitor='val_loss', patience=30,
+                restore_best_weights=True, verbose=1
+            ),
+            keras.callbacks.ReduceLROnPlateau(
+                monitor='val_loss', factor=0.5,
+                patience=15, min_lr=1e-6, verbose=0
+            ),
+        ]
+
         history = model.fit(
-            X_train, y_train,
-            validation_data=(X_val, y_val),
-            epochs=100,
-            batch_size=4,
-            callbacks=[early_stopping],
-            verbose=0
+            X_train_seq, y_train_seq,
+            validation_data=(X_val_seq, y_val_seq),
+            epochs=200,
+            batch_size=p['batch'],
+            callbacks=callbacks,
+            verbose=1,
         )
-        
-        # Evaluate
-        metrics = evaluate_model(model, X_val, y_val, model_type)
-        
-        # Save model
-        model.save(output_path)
-        
+
+        # ── Step 10: Load best checkpoint and evaluate ────────────────────────
+        best_model = keras.models.load_model(best_ckpt)
+        metrics    = _evaluate(best_model, X_test_seq, y_test_seq)
+
+        print(f"[train] DONE — epochs:{len(history.history['loss'])} "
+              f"MAPE:{metrics['mape']}% R²:{metrics['r2_score']}")
+
+        # ── Step 11: Save final model ─────────────────────────────────────────
+        best_model.save(output_path)
+        try:
+            os.remove(best_ckpt)
+        except Exception:
+            pass
+
         return {
-            'success': True,
-            'metrics': metrics,
-            'training_samples': len(X_train),
-            'validation_samples': len(X_val),
-            'epochs_trained': len(history.history['loss']),
-            'final_train_loss': history.history['loss'][-1],
-            'final_val_loss': history.history['val_loss'][-1],
+            'success':           True,
+            'metrics':           metrics,
+            'training_samples':  len(X_train_seq),
+            'validation_samples': len(X_val_seq),
+            'test_samples':      len(X_test_seq),
+            'epochs_trained':    len(history.history['loss']),
+            'final_train_loss':  float(history.history['loss'][-1]),
+            'final_val_loss':    float(history.history['val_loss'][-1]),
         }
-        
+
     except Exception as e:
-        return {
-            'success': False,
-            'error': str(e),
-            'error_type': type(e).__name__
-        }
+        import traceback
+        traceback.print_exc()
+        return {'success': False, 'error': str(e), 'error_type': type(e).__name__}
 
 
-def prepare_sequences(training_data: list, model_type: str, seq_length: int = 6) -> tuple:
-    """
-    Prepare sequences for LSTM training from monthly aggregated data.
+# ─────────────────────────────────────────────────────────────────────────────
+# Step 1: Aggregate raw per-(month, room_type) records → one row per month
+# Mirrors Data_Hotel.ipynb cells 13-15 (daily pivot → monthly aggregation)
+# ─────────────────────────────────────────────────────────────────────────────
 
-    Args:
-        training_data: List of monthly records
-        model_type: 'single' or 'multi'
-        seq_length: Number of months per sequence (default 6)
+def _build_monthly_df(training_data: list):
+    import pandas as pd
 
-    Returns:
-        (X, y) tuple of numpy arrays
-    """
-    if not training_data:
-        return None, None
+    by_month = {}
+    for rec in training_data:
+        m  = rec.get('month', '')
+        rt = rec.get('room_type_code', '').upper()
+        if not m:
+            continue
+        by_month.setdefault(m, {})[rt] = rec
 
-    # Sort by month
-    sorted_data = sorted(training_data, key=lambda x: x.get('month', ''))
+    if not by_month:
+        return None
 
-    # Group by month and calculate monthly aggregates
-    monthly_groups = {}
-    monthly_occupancy = []  # For historical calculations
+    rows = []
+    for month in sorted(by_month.keys()):
+        recs      = by_month[month]
+        std_rooms = float(recs.get('STD', {}).get('total_occupied', 0) or 0)
+        spr_rooms = float(recs.get('SPR', {}).get('total_occupied', 0) or 0)
+        fmy_rooms = float(recs.get('FMY', {}).get('total_occupied', 0) or 0)
+        js_rooms  = float(recs.get('JS',  {}).get('total_occupied', 0) or 0)
+        total     = std_rooms + spr_rooms + fmy_rooms + js_rooms
+        revenue   = float(sum(r.get('total_revenue', 0) or 0 for r in recs.values()))
 
-    for record in sorted_data:
-        month = record.get('month')
-        if month not in monthly_groups:
-            monthly_groups[month] = {}
-        room_type = record.get('room_type_code', 'UNK')
-        monthly_groups[month][room_type] = record
+        year, mon        = int(month[:4]), int(month[5:7])
+        days_in_month    = calendar.monthrange(year, mon)[1]
+        available_rn     = float(days_in_month * TOTAL_ROOMS)
+        occupancy_rate   = (total / available_rn * 100.0) if available_rn else 0.0
 
-    months = sorted(monthly_groups.keys())
+        rows.append({
+            'month':                 month,
+            'Date':                  pd.Timestamp(f'{month}-01'),
+            'Kamar_STD':             std_rooms,
+            'Kamar_SPR':             spr_rooms,
+            'Kamar_FMY':             fmy_rooms,
+            'Kamar_JS':              js_rooms,
+            'Kamar_Terjual':         total,
+            'Revenue':               revenue,
+            'Okupansi_Rate':         occupancy_rate,
+            'Available_Room_Nights': available_rn,
+        })
 
-    # Pre-calculate monthly occupancy rates for all months
-    for month in months:
-        month_data = monthly_groups[month]
-        avg_occ = sum(d.get('avg_occupancy', 0) for d in month_data.values()) / max(len(month_data), 1)
-        monthly_occupancy.append(avg_occ)
+    if not rows:
+        return None
 
-    if len(months) < seq_length + 1:
-        return None, None
-
-    X = []
-    y = []
-
-    # Create sequences
-    for i in range(len(months) - seq_length):
-        sequence = []
-        for j in range(seq_length):
-            month_idx = i + j
-            month = months[month_idx]
-            month_data = monthly_groups[month]
-
-            # Build feature vector with historical context
-            features = build_feature_vector_with_history(
-                month_data, month, month_idx, months, monthly_groups, monthly_occupancy
-            )
-            sequence.append(features)
-
-        # Target is the next month
-        target_month = months[i + seq_length]
-        target_data = monthly_groups[target_month]
-
-        if model_type == 'single':
-            # Total occupancy
-            total_occ = sum(
-                d.get('avg_occupancy', 0) for d in target_data.values()
-            ) / max(len(target_data), 1)
-            y.append([total_occ / 100])  # Normalize to 0-1
-        else:
-            # Per room type (STD, SPR, FMY, JS)
-            room_types = ['STD', 'SPR', 'FMY', 'JS']
-            target = []
-            for rt in room_types:
-                occ = target_data.get(rt, {}).get('avg_occupancy', 50) / 100
-                target.append(occ)
-            y.append(target)
-
-        X.append(sequence)
-
-    return np.array(X), np.array(y)
+    return pd.DataFrame(rows).sort_values('month').reset_index(drop=True)
 
 
-def build_feature_vector_with_history(month_data: dict, month: str, month_idx: int,
-                                      months: list, monthly_groups: dict,
-                                      monthly_occupancy: list) -> list:
-    """
-    Build a 15-feature vector from monthly data WITH proper historical calculations.
-    Features match the original Data_Hotel.ipynb preprocessing.
-    """
-    import math
+# ─────────────────────────────────────────────────────────────────────────────
+# Step 2: Engineer ALL 30 features — mirrors Data_Hotel.ipynb cells 26-30
+# ─────────────────────────────────────────────────────────────────────────────
 
-    # Current month occupancy
-    avg_occupancy = sum(d.get('avg_occupancy', 0) for d in month_data.values()) / max(len(month_data), 1)
-    total_occupied = sum(d.get('total_occupied', 0) for d in month_data.values())
-    occ_rate = avg_occupancy / 100  # Normalized
+def _engineer_all_features(df):
+    import pandas as pd
 
-    # Room type proportions
-    total_rooms = max(total_occupied, 1)
-    std_prop = month_data.get('STD', {}).get('total_occupied', 0) / total_rooms
-    spr_prop = month_data.get('SPR', {}).get('total_occupied', 0) / total_rooms
-    fmy_prop = month_data.get('FMY', {}).get('total_occupied', 0) / total_rooms
-    js_prop = month_data.get('JS', {}).get('total_occupied', 0) / total_rooms
+    occ = df['Okupansi_Rate']
+    rev = df['Revenue']
+    kt  = df['Kamar_Terjual']
 
-    # Month number for seasonality
-    try:
-        month_num = int(month.split('-')[1])
-    except:
-        month_num = 6
-    is_peak = 1.0 if month_num in [6, 7, 12] else 0.0
+    # ── Temporal (cell 26) ────────────────────────────────────────────────────
+    df['month_sin']      = np.sin(2 * np.pi * df['Date'].dt.month / 12)
+    df['month_cos']      = np.cos(2 * np.pi * df['Date'].dt.month / 12)
+    df['quarter']        = (df['Date'].dt.quarter - 1) / 3.0   # normalize 0-1 like notebook
+    df['is_peak_season'] = df['Date'].dt.month.isin([6, 7, 12]).astype(float)
+    df['is_low_season']  = df['Date'].dt.month.isin([2, 3, 9]).astype(float)
+    df['time_index']     = range(len(df))
 
-    # =================================================================
-    # HISTORICAL FEATURES (require lookback)
-    # =================================================================
+    # ── Lag features (cell 27) ────────────────────────────────────────────────
+    df['occ_lag_1']      = occ.shift(1)
+    df['occ_lag_3']      = occ.shift(3)
+    df['occ_lag_6']      = occ.shift(6)
+    df['occ_lag_12']     = occ.shift(12)
+    df['revenue_lag_1']  = rev.shift(1)
+    df['revenue_lag_3']  = rev.shift(3)
 
-    # 1. occ_momentum (rate of change of change)
-    if month_idx >= 2:
-        diff1 = monthly_occupancy[month_idx] - monthly_occupancy[month_idx - 1]
-        diff2 = monthly_occupancy[month_idx - 1] - monthly_occupancy[month_idx - 2]
-        occ_momentum = (diff1 - diff2) / 100  # Normalized
-    else:
-        occ_momentum = 0.0
+    # ── Rolling statistics (cell 28) ─────────────────────────────────────────
+    df['occ_rolling_mean_3'] = occ.rolling(3).mean()
+    df['occ_rolling_mean_6'] = occ.rolling(6).mean()
+    df['occ_rolling_std_3']  = occ.rolling(3).std()
+    df['occ_rolling_std_6']  = occ.rolling(6).std()
+    df['occ_trend']          = occ.diff()
+    df['occ_momentum']       = occ.diff().diff()
+    df['is_increasing']      = (df['occ_trend'] > 0).astype(float)
 
-    # 2. occ_trend (month-to-month change)
-    if month_idx >= 1:
-        occ_trend = (monthly_occupancy[month_idx] - monthly_occupancy[month_idx - 1]) / 100
-    else:
-        occ_trend = 0.0
+    # ── Business metrics (cell 29) ────────────────────────────────────────────
+    df['available_room_nights'] = df['Available_Room_Nights']
+    safe_kt                     = kt.replace(0, np.nan)
+    df['adr']                   = rev / safe_kt
+    df['revpar']                = rev / df['Available_Room_Nights']
+    df['std_proportion']        = df['Kamar_STD'] / safe_kt
+    df['spr_proportion']        = df['Kamar_SPR'] / safe_kt
+    df['fmy_proportion']        = df['Kamar_FMY'] / safe_kt
+    df['js_proportion']         = df['Kamar_JS']  / safe_kt
+    df['occ_yoy']               = occ.diff(12)
+    df['revenue_yoy']           = rev.diff(12)
 
-    # 3. occ_rolling_mean_3 (3-month rolling average)
-    if month_idx >= 2:
-        window = monthly_occupancy[max(0, month_idx-2):month_idx+1]
-        occ_rolling_mean_3 = (sum(window) / len(window)) / 100
-    else:
-        occ_rolling_mean_3 = occ_rate
+    # ── Fill NaN — same as notebook: ffill → bfill (cell 30) ─────────────────
+    df = df.ffill().bfill()
 
-    # 4. occ_yoy (year-over-year)
-    if month_idx >= 12:
-        occ_yoy = (monthly_occupancy[month_idx] - monthly_occupancy[month_idx - 12]) / 100
-    else:
-        occ_yoy = 0.0
-
-    # 5. is_increasing (binary trend)
-    is_increasing = 1.0 if occ_trend > 0 else 0.0
-
-    # 6. occ_rolling_mean_6 (6-month rolling average)
-    if month_idx >= 5:
-        window = monthly_occupancy[max(0, month_idx-5):month_idx+1]
-        occ_rolling_mean_6 = (sum(window) / len(window)) / 100
-    else:
-        occ_rolling_mean_6 = occ_rate
-
-    # 7. occ_rolling_std_3 (3-month standard deviation)
-    if month_idx >= 2:
-        window = [monthly_occupancy[i] / 100 for i in range(max(0, month_idx-2), month_idx+1)]
-        mean = sum(window) / len(window)
-        variance = sum((x - mean) ** 2 for x in window) / len(window)
-        occ_rolling_std_3 = math.sqrt(variance)
-    else:
-        occ_rolling_std_3 = 0.0
-
-    # 8. occ_lag_1 (previous month)
-    if month_idx >= 1:
-        occ_lag_1 = monthly_occupancy[month_idx - 1] / 100
-    else:
-        occ_lag_1 = occ_rate
-
-    # =================================================================
-    # BUILD 15-FEATURE VECTOR (exact order from training)
-    # =================================================================
-    features = [
-        total_occupied / 56,     # 0. Kamar_Terjual
-        occ_rate,                # 1. Okupansi_Rate
-        occ_momentum,            # 2. occ_momentum
-        occ_trend,               # 3. occ_trend
-        occ_rolling_mean_3,      # 4. occ_rolling_mean_3
-        occ_yoy,                 # 5. occ_yoy
-        std_prop,                # 6. std_proportion
-        is_increasing,           # 7. is_increasing
-        is_peak,                 # 8. is_peak_season
-        js_prop,                 # 9. js_proportion
-        fmy_prop,                # 10. fmy_proportion
-        spr_prop,                # 11. spr_proportion
-        occ_rolling_mean_6,      # 12. occ_rolling_mean_6
-        occ_rolling_std_3,       # 13. occ_rolling_std_3
-        occ_lag_1,               # 14. occ_lag_1
-    ]
-
-    return features
+    return df
 
 
-def build_single_output_model():
-    """Build single-output LSTM model matching original architecture."""
+# ─────────────────────────────────────────────────────────────────────────────
+# Sequence helpers — exact copies from both LSTM notebooks
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _create_sequences(X, y, seq_len=SEQ_LEN):
+    Xs, ys = [], []
+    for i in range(seq_len, len(X)):
+        Xs.append(X[i - seq_len:i])
+        ys.append(y[i])
+    return np.array(Xs), np.array(ys)
+
+
+def _create_with_borrow(X_curr, y_curr, X_prev, seq_len=SEQ_LEN):
+    if len(X_prev) < seq_len:
+        pad    = np.zeros((seq_len - len(X_prev), X_prev.shape[1]))
+        X_prev = np.vstack([pad, X_prev])
+    X_combined = np.vstack([X_prev[-seq_len:], X_curr])
+    Xs, ys = [], []
+    for i in range(len(X_curr)):
+        Xs.append(X_combined[i:i + seq_len])
+        ys.append(y_curr[i])
+    return np.array(Xs), np.array(ys)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Model architecture — identical in both LSTM notebooks
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _build_model(lstm1, lstm2, dropout, output_units):
     from tensorflow import keras
-    
+    from tensorflow.keras import layers
+
     model = keras.Sequential([
-        keras.layers.LSTM(64, return_sequences=True, input_shape=(6, 15)),
-        keras.layers.Dropout(0.3),
-        keras.layers.LSTM(32),
-        keras.layers.Dropout(0.3),
-        keras.layers.Dense(16, activation='relu'),
-        keras.layers.Dense(1, activation='linear')
+        keras.Input(shape=(SEQ_LEN, len(FEATURES_15))),
+        layers.LSTM(lstm1, return_sequences=True),
+        layers.Dropout(dropout),
+        layers.LSTM(lstm2),
+        layers.Dropout(dropout),
+        layers.Dense(8, activation='relu'),
+        layers.Dense(output_units),
     ])
-    
+    model.compile(optimizer=keras.optimizers.Adam(0.001), loss='mse', metrics=['mae'])
     return model
 
 
-def build_multi_output_model():
-    """Build multi-output LSTM model matching original architecture."""
-    from tensorflow import keras
-    
-    model = keras.Sequential([
-        keras.layers.LSTM(32, return_sequences=True, input_shape=(6, 15)),
-        keras.layers.Dropout(0.3),
-        keras.layers.LSTM(16),
-        keras.layers.Dropout(0.3),
-        keras.layers.Dense(8, activation='relu'),
-        keras.layers.Dense(4, activation='linear')  # 4 outputs: STD, SPR, FMY, JS
-    ])
-    
-    return model
+# ─────────────────────────────────────────────────────────────────────────────
+# Evaluation — matches notebook's calc_mape / calc_r2
+# ─────────────────────────────────────────────────────────────────────────────
 
+def _evaluate(model, X_test, y_test) -> dict:
+    from sklearn.metrics import r2_score, mean_squared_error
 
-def evaluate_model(model, X_val, y_val, model_type: str) -> dict:
-    """
-    Evaluate model and calculate metrics.
-    
-    Returns:
-        dict with mape, r2_score, rmse
-    """
-    from sklearn.metrics import mean_absolute_percentage_error, r2_score, mean_squared_error
-    
-    y_pred = model.predict(X_val, verbose=0)
-    
-    # Clip predictions to valid range
+    y_pred = model.predict(X_test, verbose=0)
     y_pred = np.clip(y_pred, 0, 1)
-    
-    # Calculate metrics
-    # Avoid division by zero in MAPE
-    y_val_safe = np.where(y_val < 0.01, 0.01, y_val)
-    
-    try:
-        mape = mean_absolute_percentage_error(y_val_safe, y_pred) * 100
-    except:
-        mape = 50.0  # Default if calculation fails
-    
-    try:
-        r2 = r2_score(y_val.flatten(), y_pred.flatten())
-    except:
-        r2 = 0.0
-    
-    try:
-        rmse = np.sqrt(mean_squared_error(y_val, y_pred))
-    except:
-        rmse = 0.15
-    
+
+    eps  = 1e-10
+    mape = float(np.mean(
+        np.abs((y_test.flatten() - y_pred.flatten()) /
+               (np.abs(y_test.flatten()) + eps))
+    ) * 100)
+    r2   = float(r2_score(y_test.flatten(), y_pred.flatten()))
+    rmse = float(np.sqrt(mean_squared_error(y_test.flatten(), y_pred.flatten())))
+
     return {
-        'mape': round(float(mape), 2),
-        'r2_score': round(float(r2), 4),
-        'rmse': round(float(rmse), 4),
+        'mape':     round(mape, 2),
+        'r2_score': round(r2, 4),
+        'rmse':     round(rmse, 4),
     }

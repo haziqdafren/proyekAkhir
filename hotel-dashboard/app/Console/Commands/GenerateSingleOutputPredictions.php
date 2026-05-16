@@ -64,8 +64,19 @@ class GenerateSingleOutputPredictions extends Command
         try {
             // Step 1: Get last 12 months of aggregated historical data
             $this->info('📊 Step 1: Aggregating historical data...');
-            $endDate = Carbon::now()->subMonth(); // Last complete month
+
+            // Use ACTUAL last historical date from database (not Carbon::now())
+            $lastHistoricalDate = \App\Models\HistoricalOccupancyData::max('date');
+            if (!$lastHistoricalDate) {
+                $this->error('❌ No historical data found in database');
+                return Command::FAILURE;
+            }
+
+            $endDate = Carbon::parse($lastHistoricalDate)->startOfMonth(); // Last month with data
             $startDate = $endDate->copy()->subMonths(11); // 12 months total
+
+            $this->info("   Using historical data up to: {$endDate->format('Y-m')}");
+            $this->info("   (Last historical record: {$lastHistoricalDate})");
 
             $aggregatedData = $this->aggregationService->getAggregatedMonthlyData($startDate, $endDate);
 
@@ -76,63 +87,79 @@ class GenerateSingleOutputPredictions extends Command
                 return Command::FAILURE;
             }
 
-            // Step 2: Prepare features (6 months × 15 features)
-            $this->info('🔧 Step 2: Engineering features...');
-            $features = $this->featureService->prepareFeatures($aggregatedData);
-
-            if (!$this->featureService->validateFeatureArray($features)) {
-                $this->error('❌ Feature validation failed. Expected shape: [6, 15]');
-                return Command::FAILURE;
-            }
-
-            $this->info('   Features prepared: 6 months × 15 features');
-            $this->displayFeatureSample($features);
-
-            // Step 3: Make predictions using single-output model
-            $this->info('🧠 Step 3: Running LSTM single-output model...');
-            $result = $this->mlService->predictSingleOutput($features);
-
-            if (!$result['success']) {
-                $this->error('❌ Prediction failed');
-                return Command::FAILURE;
-            }
-
-            $this->info("   Model version: {$result['model_version']}");
-            $this->info("   Model MAPE: " . round($result['confidence']['mape'], 2) . '%');
-            $this->info("   Model R²: " . round($result['confidence']['r2'], 4));
+            // Use the last historical month as the base for predictions
+            $lastHistoricalMonth = $endDate;
+            $this->info("   Predicting from last historical month: {$lastHistoricalMonth->format('Y-m')}");
             $this->newLine();
 
-            // Step 4: Store predictions for next N months
-            $this->info("💾 Step 4: Storing {$monthsAhead} months of total occupancy predictions...");
-            $this->newLine();
-
+            // Step 2-4: Generate separate prediction for each target month
             DB::beginTransaction();
 
             $storedCount = 0;
+            $firstResult = null;
+
             for ($i = 1; $i <= $monthsAhead; $i++) {
-                $predictForMonth = Carbon::now()->addMonths($i)->startOfMonth();
+                $predictForMonth = $lastHistoricalMonth->copy()->addMonths($i)->startOfMonth();
 
-                $this->info("   Month +{$i}: {$predictForMonth->format('F Y')}");
+                $this->info("Month +{$i}: {$predictForMonth->format('F Y')}");
 
-                // Calculate revenue estimate (rooms × average price)
-                $avgRoomPrice = 500000; // Average room price in IDR
-                $estimatedRevenue = $result['prediction']['rooms_sold'] * $avgRoomPrice;
+                // Step 2: Project historical data forward for THIS specific target month
+                // This creates synthetic months to vary inputs for different predictions
+                $this->info('   📈 Projecting data forward to ' . $predictForMonth->format('M Y') . '...');
+                $projectedData = $this->projectHistoricalDataForward($aggregatedData, $predictForMonth);
+
+                // Step 3: Prepare features for THIS specific target month using projected data
+                $this->info('   🔧 Engineering features for this month...');
+                $features = $this->featureService->prepareFeatures($projectedData);
+
+                if (!$this->featureService->validateFeatureArray($features)) {
+                    $this->error('   ❌ Feature validation failed. Expected shape: [6, 15]');
+                    DB::rollBack();
+                    return Command::FAILURE;
+                }
+
+                if ($i === 1) {
+                    $this->displayFeatureSample($features);
+                }
+
+                // Step 3: Make prediction for THIS month
+                $this->info('   🧠 Running LSTM model...');
+                $result = $this->mlService->predictSingleOutput($features);
+
+                if (!$result['success']) {
+                    $this->error('   ❌ Prediction failed');
+                    DB::rollBack();
+                    return Command::FAILURE;
+                }
+
+                if ($firstResult === null) {
+                    $firstResult = $result;
+                    $this->info("   Model version: {$result['model_version']}");
+                    $this->info("   Model MAPE: " . round($result['confidence']['mape'], 2) . '%');
+                    $this->info("   Model R²: " . round($result['confidence']['r2'], 4));
+                }
+
+                // Step 4: Store this month's prediction
+                // Weighted avg price: (27×180k + 23×220k + 2×270k + 4×400k) / 56 = 215,357
+                $avgRoomPrice = 215357;
+                $daysInMonth = $predictForMonth->daysInMonth;
+                $estimatedRevenue = round($result['prediction']['rooms_sold'] * $avgRoomPrice * $daysInMonth);
 
                 $predictionRecord = Prediction::create([
-                    'room_type_id' => null, // Single-output doesn't have specific room type
+                    'room_type_id' => null,
                     'prediction_date' => Carbon::now(),
                     'predicted_for_date' => $predictForMonth,
                     'predicted_occupancy_rate' => $result['prediction']['occupancy_rate'],
                     'predicted_rooms_occupied' => (int) round($result['prediction']['rooms_sold']),
                     'predicted_revenue' => $estimatedRevenue,
-                    'confidence_level' => 100 - $result['confidence']['mape'], // Higher MAPE = lower confidence
+                    'confidence_level' => 100 - $result['confidence']['mape'],
                     'model_type' => 'single',
                     'model_version' => $result['model_version'],
                 ]);
 
-                $this->line("      ✓ Total Occupancy: {$result['prediction']['occupancy_rate']}% ({$result['prediction']['rooms_sold']} rooms out of 56)");
-                $this->line("         Revenue Estimate: Rp " . number_format($estimatedRevenue, 0, ',', '.'));
-                $this->line("         Confidence: " . round(100 - $result['confidence']['mape'], 1) . '%');
+                $this->line("   ✓ Total Occupancy: {$result['prediction']['occupancy_rate']}% ({$result['prediction']['rooms_sold']} rooms out of 56)");
+                $this->line("      Revenue Estimate: Rp " . number_format($estimatedRevenue, 0, ',', '.'));
+                $this->line("      Confidence: " . round(100 - $result['confidence']['mape'], 1) . '%');
                 $storedCount++;
 
                 $this->newLine();
@@ -143,18 +170,28 @@ class GenerateSingleOutputPredictions extends Command
             // Success summary
             $this->newLine();
             $this->info("✅ Successfully generated {$storedCount} single-output predictions!");
-            $this->info("📈 Predictions cover: " . Carbon::now()->addMonth()->format('M Y') . " to " . Carbon::now()->addMonths($monthsAhead)->format('M Y'));
+            $this->info("📈 Predictions cover: " . $lastHistoricalMonth->copy()->addMonth()->format('M Y') . " to " . $lastHistoricalMonth->copy()->addMonths($monthsAhead)->format('M Y'));
 
-            // Display prediction summary
-            $this->newLine();
-            $this->displayPredictionSummary($result);
+            // Display prediction summary (using first month's result for model metadata)
+            if ($firstResult) {
+                $this->newLine();
+                $this->info('📊 Model Information:');
+                $this->table(
+                    ['Metric', 'Value'],
+                    [
+                        ['Model Version', $firstResult['model_version']],
+                        ['Model MAPE', round($firstResult['confidence']['mape'], 2) . '%'],
+                        ['Model R²', round($firstResult['confidence']['r2'], 4)],
+                        ['Confidence Level', round(100 - $firstResult['confidence']['mape'], 1) . '%'],
+                    ]
+                );
+            }
 
             Log::info('Single-output monthly predictions generated successfully', [
                 'months_ahead' => $monthsAhead,
                 'predictions_count' => $storedCount,
-                'model_version' => $result['model_version'],
-                'occupancy_rate' => $result['prediction']['occupancy_rate'],
-                'mape' => $result['confidence']['mape'],
+                'model_version' => $firstResult['model_version'] ?? 'unknown',
+                'mape' => $firstResult['confidence']['mape'] ?? 0,
             ]);
 
             return Command::SUCCESS;
@@ -204,5 +241,119 @@ class GenerateSingleOutputPredictions extends Command
                 ['Confidence Level', round(100 - $result['confidence']['mape'], 1) . '%'],
             ]
         );
+    }
+
+    /**
+     * Project historical data forward by creating synthetic months
+     * This ensures different predictions for different target months
+     */
+    private function projectHistoricalDataForward(\Illuminate\Support\Collection $historicalData, Carbon $targetMonth): \Illuminate\Support\Collection
+    {
+        // Get the last real month in historical data
+        $sorted = $historicalData->sortBy('date');
+        $lastRealMonth = $sorted->last();
+
+        if (!$lastRealMonth) {
+            return $sorted;
+        }
+
+        $lastDate = Carbon::parse($lastRealMonth->date);
+
+        // Calculate how many months ahead we're predicting
+        $monthsAhead = $lastDate->copy()->startOfMonth()->diffInMonths($targetMonth->copy()->startOfMonth());
+
+        // Skip projection for immediate next month (already has enough recent data)
+        // For 2+ months ahead, use synthetic projection to vary inputs
+        if ($monthsAhead <= 1) {
+            return $sorted;
+        }
+
+        // Create synthetic months by projecting forward based on recent trend
+        $projected = $sorted->toBase();
+
+        for ($i = 1; $i < $monthsAhead; $i++) {
+            $syntheticDate = $lastDate->copy()->addMonths($i)->startOfMonth();
+            $syntheticMonth = $this->createSyntheticMonth($projected, $syntheticDate);
+            $projected->push($syntheticMonth);
+        }
+
+        // Return only the last 24 months (to maintain data quality for YoY calculations)
+        return $projected->sortBy('date')->take(-24);
+    }
+
+    /**
+     * Create a synthetic month by projecting from recent trends with seasonal adjustment
+     */
+    private function createSyntheticMonth(\Illuminate\Support\Collection $historicalData, Carbon $targetDate): object
+    {
+        // Get last 3 months for trend calculation
+        $recent = $historicalData->sortBy('date')->take(-3);
+
+        if ($recent->count() < 3) {
+            $recent = $historicalData->sortBy('date')->take(-$historicalData->count());
+        }
+
+        // Calculate average values with a slight trend
+        $avgOccupancy = $recent->avg('occupancy_rate') ?? 50.0;
+        $avgRooms = $recent->avg('total_occupancy') ?? $recent->avg('kamar_terjual') ?? 28.0;
+
+        // Apply seasonal adjustment based on target month
+        $seasonalFactor = $this->getSeasonalFactor($targetDate->month);
+        $adjustedOccupancy = min(100, max(0, $avgOccupancy * $seasonalFactor));
+        $adjustedRooms = min(56, max(0, $avgRooms * $seasonalFactor));
+
+        // Use actual hotel room distribution: STD=32, SPR=19, JS=2, FMY=3 (total=56)
+        $roomCapacities = config('ml.room_capacities', [
+            'STD' => 32,
+            'SPR' => 19,
+            'JS' => 2,
+            'FMY' => 3,
+        ]);
+        $totalCapacity = array_sum($roomCapacities);
+
+        return (object) [
+            'date' => $targetDate,
+            'occupancy_rate' => round($adjustedOccupancy, 2),
+            'total_occupancy' => round($adjustedRooms, 2),
+            'kamar_terjual' => round($adjustedRooms, 2),
+            'kamar_std' => round($adjustedRooms * ($roomCapacities['STD'] / $totalCapacity), 2),
+            'kamar_spr' => round($adjustedRooms * ($roomCapacities['SPR'] / $totalCapacity), 2),
+            'kamar_fmy' => round($adjustedRooms * ($roomCapacities['FMY'] / $totalCapacity), 2),
+            'kamar_js' => round($adjustedRooms * ($roomCapacities['JS'] / $totalCapacity), 2),
+        ];
+    }
+
+    /**
+     * Get seasonal adjustment factor based on month
+     */
+    private function getSeasonalFactor(int $month): float
+    {
+        // Get peak months from configuration
+        $peakMonths = config('ml.peak_months', [6, 7, 12]);
+
+        // Peak season - high demand periods
+        if (in_array($month, $peakMonths)) {
+            return 1.20; // 20% boost
+        }
+
+        // Calculate shoulder months (one month before/after peak)
+        $shoulderMonths = [];
+        foreach ($peakMonths as $peak) {
+            $before = $peak - 1;
+            $after = $peak + 1;
+            if ($before == 0) $before = 12;
+            if ($after == 13) $after = 1;
+            $shoulderMonths[] = $before;
+            $shoulderMonths[] = $after;
+        }
+        $shoulderMonths = array_unique($shoulderMonths);
+
+        // Shoulder season - moderate demand
+        if (in_array($month, $shoulderMonths)) {
+            return 1.05; // 5% boost
+        }
+
+        // Low season - lower demand
+        return 0.90; // 10% reduction
     }
 }

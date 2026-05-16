@@ -9,6 +9,7 @@ use App\Models\ModelVersion;
 use App\Services\MLPredictionService;
 use App\Services\FeatureEngineeringService;
 use App\Services\HistoricalDataAggregationService;
+use App\Services\RecommendationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -20,47 +21,58 @@ class PredictionController extends Controller
     protected MLPredictionService $mlService;
     protected FeatureEngineeringService $featureService;
     protected HistoricalDataAggregationService $aggregationService;
+    protected RecommendationService $recommendationService;
 
     public function __construct(
         MLPredictionService $mlService,
         FeatureEngineeringService $featureService,
-        HistoricalDataAggregationService $aggregationService
+        HistoricalDataAggregationService $aggregationService,
+        RecommendationService $recommendationService
     ) {
         $this->mlService = $mlService;
         $this->featureService = $featureService;
         $this->aggregationService = $aggregationService;
+        $this->recommendationService = $recommendationService;
     }
     public function index(Request $request)
     {
         // Get all room types
         $roomTypes = RoomType::where('is_active', true)->get();
 
-        // Get ONLY FUTURE predictions (from current month onwards)
+        // Get ALL predictions (including past months for demonstration/validation)
         $allPredictions = Prediction::with('roomType')
-            ->where('predicted_for_date', '>=', Carbon::now()->startOfMonth())
             ->orderBy('predicted_for_date', 'asc')
             ->orderBy('model_type')
-            ->get();
+            ->get()
+            ->map(function ($p) {
+                $arr = $p->toArray();
+                $arr['raw_date'] = $p->getRawOriginal('predicted_for_date');
+                return $arr;
+            });
 
         // Group predictions by month for timeline view
         $predictionsByMonth = $allPredictions->groupBy(function ($prediction) {
-            return Carbon::parse($prediction->predicted_for_date)->format('Y-m');
+            return Carbon::parse($prediction['raw_date'] ?? $prediction['predicted_for_date'])->format('Y-m');
         })->map(function ($monthPredictions, $monthKey) {
             $date = Carbon::createFromFormat('Y-m', $monthKey);
+            $avgOccupancy = round($monthPredictions->avg(fn ($p) => $p['predicted_occupancy_rate'] ?? 0), 1);
             return [
                 'month_key' => $monthKey,
-                'month_label' => $date->format('F Y'),
+                'month_label' => $date->translatedFormat('F Y'),
                 'month_short' => $date->format('M Y'),
                 'predictions' => $monthPredictions->values(),
-                'avg_occupancy' => round($monthPredictions->avg('predicted_occupancy_rate'), 1),
+                'avg_occupancy' => $avgOccupancy,
                 'count' => $monthPredictions->count(),
             ];
         })->values();
 
         // Calculate quick stats
+        $avgOccupancy = $allPredictions->count() > 0
+            ? round($allPredictions->avg(fn ($p) => $p['predicted_occupancy_rate'] ?? 0), 1)
+            : 0;
         $stats = [
             'total_predictions' => $allPredictions->count(),
-            'avg_occupancy' => $allPredictions->count() > 0 ? round($allPredictions->avg('predicted_occupancy_rate'), 1) : 0,
+            'avg_occupancy' => $avgOccupancy,
             'highest_month' => $predictionsByMonth->sortByDesc('avg_occupancy')->first(),
             'lowest_month' => $predictionsByMonth->sortBy('avg_occupancy')->first(),
             'single_count' => $allPredictions->where('model_type', 'single')->count(),
@@ -71,6 +83,8 @@ class PredictionController extends Controller
         $singleChampion = $this->getChampionModelInfo('single');
         $multiChampion = $this->getChampionModelInfo('multi');
 
+        $dbMaxDate = HistoricalOccupancyData::max('date') ?? now()->toDateString();
+
         return Inertia::render('Predictions/Index', [
             'roomTypes' => $roomTypes,
             'allPredictions' => $allPredictions,
@@ -78,124 +92,34 @@ class PredictionController extends Controller
             'stats' => $stats,
             'singleModelInfo' => $singleChampion,
             'multiModelInfo' => $multiChampion,
-        ]);
-    }
-
-    /**
-     * OLD METHOD - Keep for reference but rename
-     */
-    public function indexOld(Request $request)
-    {
-        // Get filter parameters with proper type casting and validation
-        $roomTypeFilter = $request->get('room_type', 'all');
-
-        // For monthly predictions, use months instead of days
-        $monthsAhead = $request->get('months_ahead', 3);
-        $monthsAhead = is_numeric($monthsAhead) ? (int) $monthsAhead : 3;
-        $monthsAhead = max(1, min($monthsAhead, 12)); // Between 1 and 12 months
-
-        $modelType = $request->get('model_type', 'multi'); // Default to multi-output
-
-        // Get all room types for filter dropdown
-        $roomTypes = RoomType::where('is_active', true)->get();
-
-        // Build predictions query for MONTHLY predictions
-        $predictionsQuery = Prediction::with('roomType')
-            ->where('predicted_for_date', '>=', Carbon::now()->startOfMonth())
-            ->where('predicted_for_date', '<=', Carbon::now()->addMonths($monthsAhead)->endOfMonth());
-
-        if ($roomTypeFilter !== 'all') {
-            $predictionsQuery->where('room_type_id', $roomTypeFilter);
-        }
-
-        if ($modelType !== 'all') {
-            $predictionsQuery->where('model_type', $modelType);
-        }
-
-        $predictions = $predictionsQuery->orderBy('predicted_for_date')
-            ->orderBy('room_type_id')
-            ->get();
-
-        // Group predictions by month for the timeline
-        $predictionsByMonth = $predictions->groupBy(function ($prediction) {
-            return Carbon::parse($prediction->predicted_for_date)->format('Y-m');
-        });
-
-        // Calculate statistics with null safety
-        $stats = [
-            'avgOccupancy' => $predictions->avg('predicted_occupancy_rate') ?? 0.0,
-            'maxOccupancy' => $predictions->max('predicted_occupancy_rate') ?? 0.0,
-            'minOccupancy' => $predictions->min('predicted_occupancy_rate') ?? 0.0,
-            'avgConfidence' => $predictions->avg('confidence_level') ?? 0.0,
-            'totalPredictions' => $predictions->count(),
-        ];
-
-        // Get predictions by room type for comparison
-        $predictionsByRoomType = [];
-        foreach ($roomTypes as $roomType) {
-            $roomPredictions = $predictions->where('room_type_id', $roomType->id);
-
-            if ($roomPredictions->isNotEmpty()) {
-                $predictionsByRoomType[] = [
-                    'id' => $roomType->id,
-                    'name' => $roomType->name,
-                    'avgOccupancy' => round($roomPredictions->avg('predicted_occupancy_rate'), 1),
-                    'avgConfidence' => round($roomPredictions->avg('confidence_level'), 1),
-                    'trend' => $this->calculateTrend($roomType->id),
-                    'peakDate' => $roomPredictions->sortByDesc('predicted_occupancy_rate')->first()->predicted_for_date,
-                    'peakOccupancy' => round($roomPredictions->max('predicted_occupancy_rate'), 1),
-                    'color' => $this->getRoomTypeColor($roomType->id),
-                ];
-            }
-        }
-
-        // Prepare chart data for daily predictions
-        $chartData = [
-            'dates' => [],
-            'series' => [],
-        ];
-
-        // Group by room type for chart
-        foreach ($roomTypes as $roomType) {
-            $roomPredictions = $predictions->where('room_type_id', $roomType->id);
-
-            if ($roomPredictions->isNotEmpty()) {
-                $chartData['series'][] = [
-                    'name' => $roomType->name,
-                    'data' => $roomPredictions->map(function ($prediction) {
-                        return [
-                            'x' => Carbon::parse($prediction->predicted_for_date)->timestamp * 1000,
-                            'y' => round($prediction->predicted_occupancy_rate, 1),
-                        ];
-                    })->values()->toArray(),
-                ];
-            }
-        }
-
-        // Get recommendations based on predictions
-        $recommendations = $this->generateRecommendations($predictions, $roomTypes);
-
-        return Inertia::render('Predictions/Index', [
-            'predictions' => $predictions,
-            'predictionsByMonth' => $predictionsByMonth,
-            'predictionsByRoomType' => $predictionsByRoomType,
-            'stats' => $stats,
-            'chartData' => $chartData,
-            'roomTypes' => $roomTypes,
-            'recommendations' => $recommendations,
-            'filters' => [
-                'room_type' => $roomTypeFilter,
-                'months_ahead' => $monthsAhead,
-                'model_type' => $modelType,
-            ],
+            'dbMaxDate' => Carbon::parse($dbMaxDate)->format('Y-m-d'),
         ]);
     }
 
     private function calculateTrend($roomTypeId)
     {
-        // Get last 7 days historical vs next 7 days predicted
-        // For demo purposes, return random trend
-        return rand(-15, 25);
+        // Calculate actual trend by comparing historical data to predictions
+        $lastMonth = Carbon::now()->subMonth();
+
+        // Get historical average occupancy for this room type in the last month
+        $historicalAvg = HistoricalOccupancyData::where('room_type_id', $roomTypeId)
+            ->whereYear('date', $lastMonth->year)
+            ->whereMonth('date', $lastMonth->month)
+            ->avg('occupancy_rate');
+
+        // Get predicted average for this room type in the next month
+        $nextMonth = Carbon::now()->addMonth()->startOfMonth();
+        $predictedAvg = Prediction::where('room_type_id', $roomTypeId)
+            ->whereYear('predicted_for_date', $nextMonth->year)
+            ->whereMonth('predicted_for_date', $nextMonth->month)
+            ->avg('predicted_occupancy_rate');
+
+        // Calculate percentage change
+        if ($historicalAvg > 0 && $predictedAvg !== null) {
+            return round((($predictedAvg - $historicalAvg) / $historicalAvg) * 100, 1);
+        }
+
+        return 0;
     }
 
     private function getRoomTypeColor($roomTypeId)
@@ -209,12 +133,12 @@ class PredictionController extends Controller
         $recommendations = [];
 
         // Find peak occupancy periods
-        $highOccupancyDays = $predictions->where('predicted_occupancy_rate', '>', 80);
+        $highOccupancyDays = $predictions->where('predicted_occupancy_rate', '>=', 55);
         if ($highOccupancyDays->count() > 0) {
             $recommendations[] = [
                 'type' => 'warning',
                 'title' => 'Okupansi Tinggi Terdeteksi',
-                'description' => "Terdapat {$highOccupancyDays->count()} hari dengan prediksi okupansi di atas 80%. Pertimbangkan untuk menaikkan harga atau menyiapkan staf tambahan.",
+                'description' => "Terdapat {$highOccupancyDays->count()} hari dengan prediksi okupansi di atas 55%. Pertimbangkan untuk menaikkan harga atau menyiapkan staf tambahan.",
                 'icon' => 'trending-up',
                 'priority' => 'high',
             ];
@@ -237,7 +161,7 @@ class PredictionController extends Controller
             $roomPredictions = $predictions->where('room_type_id', $roomType->id);
             $avgOccupancy = $roomPredictions->avg('predicted_occupancy_rate');
 
-            if ($avgOccupancy > 85) {
+            if ($avgOccupancy >= 55) {
                 $recommendations[] = [
                     'type' => 'success',
                     'title' => "{$roomType->name} - Permintaan Tinggi",
@@ -245,7 +169,7 @@ class PredictionController extends Controller
                     'icon' => 'star',
                     'priority' => 'medium',
                 ];
-            } elseif ($avgOccupancy < 45) {
+            } elseif ($avgOccupancy < 40) {
                 $recommendations[] = [
                     'type' => 'warning',
                     'title' => "{$roomType->name} - Okupansi Rendah",
@@ -267,10 +191,9 @@ class PredictionController extends Controller
         $roomTypes = RoomType::where('is_active', true)->get();
         $totalRooms = $roomTypes->sum('total_rooms');
 
-        // Get recent predictions for display
+        // Get all predictions for display (including past months for demonstration)
         $recentPredictions = Prediction::where('model_type', 'single')
-            ->where('predicted_for_date', '>=', Carbon::now())
-            ->orderBy('predicted_for_date')
+            ->orderBy('predicted_for_date', 'desc')
             ->limit(30)
             ->get()
             ->map(function ($prediction) use ($totalRooms) {
@@ -283,12 +206,23 @@ class PredictionController extends Controller
         // Get REAL-TIME champion model info from database
         $modelInfo = $this->getChampionModelInfo('single');
 
+        // dbMaxDate drives the "next predictable month" picker.
+        // Use the latest already-predicted month so the picker starts AFTER it,
+        // preventing duplicate predictions for months that already exist.
+        $latestPredicted = Prediction::where('model_type', 'single')
+            ->max(DB::raw("DATE(predicted_for_date)"));
+        $histMax = HistoricalOccupancyData::max('date') ?? now()->toDateString();
+        $dbMaxDate = $latestPredicted
+            ? Carbon::parse($latestPredicted)->endOfMonth()->format('Y-m-d')
+            : $histMax;
+
         return Inertia::render('Predictions/SingleOutput', [
             'roomTypes' => $roomTypes,
             'recentPredictions' => $recentPredictions,
             'comparisons' => $comparisons,
             'totalRooms' => $totalRooms,
             'modelInfo' => $modelInfo,
+            'dbMaxDate' => Carbon::parse($dbMaxDate)->format('Y-m-d'),
         ]);
     }
 
@@ -299,11 +233,10 @@ class PredictionController extends Controller
     {
         $roomTypes = RoomType::where('is_active', true)->get();
 
-        // Get recent predictions for display
+        // Get all predictions for display (including past months for demonstration)
         $recentPredictions = Prediction::where('model_type', 'multi')
-            ->where('predicted_for_date', '>=', Carbon::now())
             ->with('roomType')
-            ->orderBy('predicted_for_date')
+            ->orderBy('predicted_for_date', 'desc')
             ->limit(30)
             ->get()
             ->map(function ($prediction) {
@@ -317,12 +250,21 @@ class PredictionController extends Controller
         // Get REAL-TIME champion model info from database
         $modelInfo = $this->getChampionModelInfo('multi');
 
+        // Use latest predicted month (any room type) as the base for the picker
+        $latestPredicted = Prediction::where('model_type', 'multi')
+            ->max(DB::raw("DATE(predicted_for_date)"));
+        $histMax = HistoricalOccupancyData::max('date') ?? now()->toDateString();
+        $dbMaxDate = $latestPredicted
+            ? Carbon::parse($latestPredicted)->endOfMonth()->format('Y-m-d')
+            : $histMax;
+
         return Inertia::render('Predictions/MultiOutput', [
             'roomTypes' => $roomTypes,
             'recentPredictions' => $recentPredictions,
             'comparisons' => $comparisons,
             'modelInfo' => $modelInfo,
             'roomCapacities' => config('ml.room_capacities'),
+            'dbMaxDate' => Carbon::parse($dbMaxDate)->format('Y-m-d'),
         ]);
     }
 
@@ -383,13 +325,29 @@ class PredictionController extends Controller
             $championModel = ModelVersion::getChampion('single');
             $confidenceLevel = 100 - ($championModel?->mape ?? 5); // Use champion's MAPE or default 5%
 
+            // Calculate capacity-weighted average price for revenue estimation
+            $roomTypes = RoomType::where('is_active', true)->get();
+            $totalCapacity = $roomTypes->sum('total_rooms');
+            $weightedAveragePrice = 0;
+            if ($totalCapacity > 0) {
+                foreach ($roomTypes as $rt) {
+                    $weightedAveragePrice += ($rt->base_price * $rt->total_rooms);
+                }
+                $weightedAveragePrice = $weightedAveragePrice / $totalCapacity;
+            } else {
+                // Fallback: use average of all room type prices if no capacity defined
+                $weightedAveragePrice = $roomTypes->avg('base_price') ?: 500000;
+            }
+
+            $daysInMonth = $targetMonth->daysInMonth;
             $predictionData = [
                 'room_type_id' => null, // Single output doesn't have specific room type
                 'prediction_date' => Carbon::now(),
                 'predicted_for_date' => $targetMonth,
                 'predicted_occupancy_rate' => $result['prediction']['occupancy_rate'],
                 'predicted_rooms_occupied' => (int) round($result['prediction']['rooms_sold']),
-                'predicted_revenue' => $result['prediction']['rooms_sold'] * 500000, // Estimate
+                // Revenue = avg rooms/day * weighted price/night * days in month
+                'predicted_revenue' => round($result['prediction']['rooms_sold'] * $weightedAveragePrice * $daysInMonth),
                 'confidence_level' => $confidenceLevel,
                 'model_type' => 'single',
                 'model_version' => $championModel?->version ?? 'v1.0.0',
@@ -415,8 +373,8 @@ class PredictionController extends Controller
             ]);
 
             $message = $action === 'updated'
-                ? "Prediksi berhasil diperbarui untuk {$predictMonth->format('F Y')}: {$result['prediction']['occupancy_rate']}% okupansi ({$result['prediction']['rooms_sold']} kamar)"
-                : "Prediksi berhasil dibuat untuk {$predictMonth->format('F Y')}: {$result['prediction']['occupancy_rate']}% okupansi ({$result['prediction']['rooms_sold']} kamar)";
+                ? "Prediksi berhasil diperbarui untuk {$predictMonth->translatedFormat('F Y')}: {$result['prediction']['occupancy_rate']}% okupansi ({$result['prediction']['rooms_sold']} kamar)"
+                : "Prediksi berhasil dibuat untuk {$predictMonth->translatedFormat('F Y')}: {$result['prediction']['occupancy_rate']}% okupansi ({$result['prediction']['rooms_sold']} kamar)";
 
             return redirect()->route('predictions.single')->with('success', $message);
 
@@ -501,13 +459,15 @@ class PredictionController extends Controller
                 $roomType = RoomType::where('code', $roomCode)->first();
 
                 if ($roomType) {
+                    $daysInMonth = $targetMonth->daysInMonth;
                     $predictionData = [
                         'room_type_id' => $roomType->id,
                         'prediction_date' => Carbon::now(),
                         'predicted_for_date' => $targetMonth,
                         'predicted_occupancy_rate' => $prediction['occupancy_rate'],
                         'predicted_rooms_occupied' => (int) round($prediction['rooms_sold']),
-                        'predicted_revenue' => $prediction['rooms_sold'] * $roomType->base_price,
+                        // Revenue = avg rooms/day * price/night * days in month
+                        'predicted_revenue' => round($prediction['rooms_sold'] * $roomType->base_price * $daysInMonth),
                         'confidence_level' => $confidenceLevel,
                         'model_type' => 'multi',
                         'model_version' => $championModel?->version ?? 'v1.0.0',
@@ -534,7 +494,7 @@ class PredictionController extends Controller
             ]);
 
             $action = $isUpdate ? 'diperbarui' : 'dibuat';
-            $summaryMessage = "Prediksi berhasil {$action} untuk {$predictMonth->format('F Y')}: ";
+            $summaryMessage = "Prediksi berhasil {$action} untuk {$predictMonth->translatedFormat('F Y')}: ";
             foreach ($result['predictions'] as $roomCode => $pred) {
                 $summaryMessage .= "{$roomCode}: {$pred['occupancy_rate']}%, ";
             }
@@ -576,7 +536,7 @@ class PredictionController extends Controller
                 'count' => $count,
             ]);
 
-            $monthName = $targetDate->format('F Y');
+            $monthName = $targetDate->translatedFormat('F Y');
             $typeName = $type === 'single' ? 'Single-Output' : 'Multi-Output';
 
             return back()->with('success',
@@ -603,31 +563,51 @@ class PredictionController extends Controller
     private function enrichPredictionWithInsights($prediction, $roomCapacity, $modelType)
     {
         $occupancyRate = $prediction->predicted_occupancy_rate;
-        $predictedDate = Carbon::parse($prediction->predicted_for_date);
+        $predictedDate = Carbon::parse($prediction->getRawOriginal('predicted_for_date'));
         $daysInMonth = $predictedDate->daysInMonth;
 
-        // Calculate average rooms occupied per day
-        $avgRoomsPerDay = round($roomCapacity * ($occupancyRate / 100));
+        // Average rooms occupied per day (use stored value, fall back to calculation)
+        $avgRoomsPerDay = $prediction->predicted_rooms_occupied
+            ?: (int) round($roomCapacity * ($occupancyRate / 100));
 
-        // Calculate total room-nights for the month
-        $totalRoomNights = $roomCapacity * $daysInMonth;
-        $occupiedRoomNights = round($totalRoomNights * ($occupancyRate / 100));
+        // Total room-nights available and occupied this month
+        $totalRoomNights   = $roomCapacity * $daysInMonth;
+        $occupiedRoomNights = $avgRoomsPerDay * $daysInMonth;
 
-        // Estimate revenue (using average room rate)
-        $avgRoomRate = $modelType === 'single' ? 450000 : ($prediction->roomType ? $prediction->roomType->base_price : 450000);
-        $estimatedRevenue = $occupiedRoomNights * $avgRoomRate;
+        // Use stored predicted_revenue (already computed correctly as rooms/day * price * days)
+        // Fall back to recalculation if null
+        $estimatedRevenue = (float) $prediction->predicted_revenue;
+        if ($estimatedRevenue <= 0) {
+            $roomTypes = RoomType::where('is_active', true)->get();
+            $totalCap  = $roomTypes->sum('total_rooms') ?: 1;
+            $weightedPrice = $roomTypes->sum(fn ($rt) => $rt->base_price * $rt->total_rooms) / $totalCap;
+            $pricePerNight = $modelType === 'single'
+                ? $weightedPrice
+                : ($prediction->roomType?->base_price ?? $weightedPrice);
+            $estimatedRevenue = $avgRoomsPerDay * $pricePerNight * $daysInMonth;
+        }
 
         // Staffing recommendation based on occupancy
         $staffingLevel = $this->getStaffingRecommendation($occupancyRate, $avgRoomsPerDay);
 
-        // Marketing action based on occupancy level
-        $marketingAction = $this->getMarketingAction($occupancyRate);
+        // Marketing action based on occupancy level — pass room capacity for small-type logic
+        $marketingAction = $this->getMarketingAction($occupancyRate, $roomCapacity);
 
-        // Performance category
-        $performanceCategory = $this->getPerformanceCategory($occupancyRate);
+        // Performance category — capacity-aware so JS/FMY get fair thresholds
+        $performanceCategory = $this->getPerformanceCategory($occupancyRate, $roomCapacity);
+
+        // Yield Management recommendation (2-Factor Rule-Based)
+        // Ambil okupansi bulan sebelumnya dari DB (prediksi atau historis)
+        $previousOccupancy = $this->getPreviousOccupancy($prediction, $modelType);
+        $yieldRecommendation = $this->recommendationService->getRecommendation(
+            (float) $occupancyRate,
+            (float) $previousOccupancy
+        );
 
         // Add all insights to the prediction object
         $predictionArray = $prediction->toArray();
+        // Store raw DB date string (YYYY-MM-DD HH:MM:SS) before UTC cast mangles it
+        $predictionArray['raw_date'] = $prediction->getRawOriginal('predicted_for_date');
         $predictionArray['insights'] = [
             'avg_rooms_per_day' => $avgRoomsPerDay,
             'total_room_nights' => $totalRoomNights,
@@ -638,94 +618,205 @@ class PredictionController extends Controller
             'marketing' => $marketingAction,
             'performance' => $performanceCategory,
             'interpretation' => $this->getInterpretation($occupancyRate, $avgRoomsPerDay, $roomCapacity, $modelType),
+            'yield_recommendation' => $yieldRecommendation,
         ];
 
         return $predictionArray;
     }
 
     /**
-     * Get staffing recommendation based on occupancy
+     * Ambil okupansi bulan sebelumnya untuk perhitungan tren rekomendasi.
+     * Prioritas: prediksi bulan lalu → data historis bulan lalu → 0
+     */
+    private function getPreviousOccupancy($prediction, string $modelType): float
+    {
+        $predictedDate = Carbon::parse($prediction->getRawOriginal('predicted_for_date'));
+        $previousMonth = $predictedDate->copy()->subMonth();
+
+        // Coba ambil dari prediksi bulan sebelumnya (model type & room type sama)
+        $prevPrediction = Prediction::where('model_type', $modelType)
+            ->whereYear('predicted_for_date', $previousMonth->year)
+            ->whereMonth('predicted_for_date', $previousMonth->month)
+            ->when($prediction->room_type_id, fn ($q) => $q->where('room_type_id', $prediction->room_type_id))
+            ->orderByDesc('created_at')
+            ->first();
+
+        if ($prevPrediction) {
+            return (float) $prevPrediction->predicted_occupancy_rate;
+        }
+
+        // Fallback: data historis bulan lalu
+        $historicalData = HistoricalOccupancyData::whereYear('date', $previousMonth->year)
+            ->whereMonth('date', $previousMonth->month)
+            ->when($prediction->room_type_id, fn ($q) => $q->where('room_type_id', $prediction->room_type_id))
+            ->get();
+
+        if ($historicalData->isNotEmpty()) {
+            $roomTypes = \App\Models\RoomType::where('is_active', true)->get();
+            $occupancyService = app(\App\Services\OccupancyCalculationService::class);
+            return (float) $occupancyService->calculateWeightedOccupancy($historicalData, $roomTypes);
+        }
+
+        return 0.0;
+    }
+
+    /**
+     * Get staffing recommendation based on actual rooms occupied per day.
+     * Uses absolute room count as primary signal — more meaningful than % for operations.
      */
     private function getStaffingRecommendation($occupancyRate, $avgRoomsPerDay)
     {
-        if ($occupancyRate >= 75) {
+        $roomText = $avgRoomsPerDay === 1 ? '1 kamar' : "~{$avgRoomsPerDay} kamar";
+
+        if ($avgRoomsPerDay >= 30) {
             return [
-                'level' => 'Penuh',
-                'description' => "Butuh semua staff (housekeeping untuk ~{$avgRoomsPerDay} kamar, full front desk & F&B)",
-                'priority' => 'high',
+                'level'       => 'Penuh',
+                'description' => "Semua staff diperlukan — housekeeping penuh untuk {$roomText}, front desk & F&B standar penuh",
+                'priority'    => 'high',
             ];
-        } elseif ($occupancyRate >= 50) {
+        } elseif ($avgRoomsPerDay >= 15) {
             return [
-                'level' => 'Sedang',
-                'description' => "Staff standar (housekeeping untuk {$avgRoomsPerDay} kamar, shift normal)",
-                'priority' => 'medium',
+                'level'       => 'Sedang',
+                'description' => "Staff standar mencukupi — housekeeping untuk {$roomText}, shift normal, front desk standar",
+                'priority'    => 'medium',
+            ];
+        } elseif ($avgRoomsPerDay >= 5) {
+            return [
+                'level'       => 'Terbatas',
+                'description' => "Staff terbatas cukup — housekeeping untuk {$roomText}, pertimbangkan shift lebih pendek atau gabung shift",
+                'priority'    => 'low',
+            ];
+        } elseif ($avgRoomsPerDay >= 2) {
+            return [
+                'level'       => 'Minimal',
+                'description' => "Staff minimal — housekeeping untuk {$roomText}, 1–2 staf paruh-waktu sudah mencukupi",
+                'priority'    => 'low',
             ];
         } else {
             return [
-                'level' => 'Minimal',
-                'description' => "Staff minimal (housekeeping untuk {$avgRoomsPerDay} kamar, pertimbangkan part-time)",
-                'priority' => 'low',
+                'level'       => 'Minimal',
+                'description' => "Hanya {$roomText} terisi — 1 staf housekeeping paruh-waktu sudah cukup",
+                'priority'    => 'low',
             ];
         }
     }
 
     /**
-     * Get marketing action recommendation
+     * Get marketing action recommendation — scaled to actual room count.
+     *
+     * For very small room types (JS = 2 rooms) an occupancy of 40% = 0.8 rooms.
+     * "Promosi Agresif" for a 2-room type is meaningless, so we use absolute room count
+     * to override % thresholds when the type is tiny.
      */
-    private function getMarketingAction($occupancyRate)
+    private function getMarketingAction($occupancyRate, $totalRooms = null)
     {
-        if ($occupancyRate >= 80) {
+        $avgRooms = $totalRooms ? round($totalRooms * ($occupancyRate / 100)) : null;
+
+        // For very small room types (≤4 rooms), occupancy % is misleading.
+        // Use absolute-room thresholds instead when we have the capacity available.
+        if ($totalRooms !== null && $totalRooms <= 4) {
+            if ($avgRooms >= $totalRooms * 0.75) {
+                return [
+                    'action'      => 'Pertahankan & Naikkan Harga',
+                    'description' => 'Permintaan tinggi untuk tipe ini — pertimbangkan kenaikan tarif dan pastikan kualitas layanan premium terjaga',
+                    'urgency'     => 'low',
+                ];
+            } elseif ($avgRooms >= 1) {
+                return [
+                    'action'      => 'Marketing Selektif',
+                    'description' => 'Tawarkan paket khusus untuk tipe kamar ini melalui OTA dan channel direct',
+                    'urgency'     => 'medium',
+                ];
+            } else {
+                return [
+                    'action'      => 'Evaluasi Tipe Kamar',
+                    'description' => 'Permintaan sangat rendah — pertimbangkan bundling paket atau promosi khusus. Evaluasi apakah perlu penyesuaian harga.',
+                    'urgency'     => 'high',
+                ];
+            }
+        }
+
+        // Standard thresholds for larger room types (STD 32, SPR 19)
+        if ($occupancyRate >= 55) {
             return [
-                'action' => 'Pertahankan & Naikkan Harga',
-                'description' => 'Okupansi tinggi - fokus pada kualitas layanan, pertimbangkan kenaikan harga 5-10%',
-                'urgency' => 'low',
-            ];
-        } elseif ($occupancyRate >= 60) {
-            return [
-                'action' => 'Marketing Ringan',
-                'description' => 'Okupansi baik - lakukan marketing rutin, tawarkan early bird discount (5-10%)',
-                'urgency' => 'medium',
+                'action'      => 'Pertahankan & Naikkan Harga',
+                'description' => 'Okupansi tinggi — fokus pada kualitas layanan, pertimbangkan kenaikan harga 5–10%',
+                'urgency'     => 'low',
             ];
         } elseif ($occupancyRate >= 40) {
             return [
-                'action' => 'Promosi Aktif',
-                'description' => 'Okupansi sedang - aktifkan kampanye di OTA, tawarkan paket promo (diskon 15-20%)',
-                'urgency' => 'high',
+                'action'      => 'Promosi Aktif',
+                'description' => 'Okupansi sedang — aktifkan kampanye OTA, tawarkan paket promo (diskon 15–20%)',
+                'urgency'     => 'high',
             ];
         } else {
             return [
-                'action' => 'Promosi Agresif',
-                'description' => 'Okupansi rendah - promo besar (diskon 25-30%), partnership corporate, event marketing',
-                'urgency' => 'urgent',
+                'action'      => 'Promosi Agresif',
+                'description' => 'Okupansi rendah — promo besar (diskon 25–30%), partnership corporate, event marketing',
+                'urgency'     => 'urgent',
             ];
         }
     }
 
     /**
-     * Get performance category
+     * Get performance category — capacity-aware thresholds.
+     *
+     * Small room types (JS=2, FMY=3) have high occupancy variance — even 1 room filled
+     * is meaningful. We use looser thresholds so they aren't penalised unfairly.
+     *
+     * Thresholds by capacity:
+     *   ≤4  rooms (JS=2, FMY=3): Sangat Baik ≥75%, Baik ≥50%, Sedang ≥25%, Perlu Perhatian <25%
+     *   5–15 rooms (medium):    Sangat Baik ≥75%, Baik ≥55%, Sedang ≥35%, Perlu Perhatian <35%
+     *   >15 rooms (STD=32, SPR=19): Sangat Baik ≥55%, Baik ≥40%, Perlu Perhatian <40%
      */
-    private function getPerformanceCategory($occupancyRate)
+    private function getPerformanceCategory($occupancyRate, $roomCapacity = null)
     {
-        if ($occupancyRate >= 80) {
-            return ['level' => 'Sangat Baik', 'color' => 'green', 'icon' => '🎉'];
-        } elseif ($occupancyRate >= 60) {
-            return ['level' => 'Baik', 'color' => 'blue', 'icon' => '✅'];
-        } elseif ($occupancyRate >= 40) {
-            return ['level' => 'Sedang', 'color' => 'yellow', 'icon' => '⚠️'];
-        } else {
-            return ['level' => 'Perlu Perhatian', 'color' => 'red', 'icon' => '🚨'];
+        // Determine threshold tier by capacity
+        if ($roomCapacity !== null && $roomCapacity <= 4) {
+            // Tiny types — 1 room filled out of 2 = 50%, already decent
+            if ($occupancyRate >= 75) return ['level' => 'Sangat Baik', 'color' => 'primary'];
+            if ($occupancyRate >= 50) return ['level' => 'Baik',        'color' => 'primary-light'];
+            if ($occupancyRate >= 25) return ['level' => 'Sedang',      'color' => 'yellow'];
+            return ['level' => 'Perlu Perhatian', 'color' => 'red'];
         }
+
+        if ($roomCapacity !== null && $roomCapacity <= 15) {
+            // Medium types
+            if ($occupancyRate >= 75) return ['level' => 'Sangat Baik', 'color' => 'primary'];
+            if ($occupancyRate >= 55) return ['level' => 'Baik',        'color' => 'primary-light'];
+            if ($occupancyRate >= 35) return ['level' => 'Sedang',      'color' => 'yellow'];
+            return ['level' => 'Perlu Perhatian', 'color' => 'red'];
+        }
+
+        // Large types (STD 32, SPR 19) or single-output (56 total)
+        if ($occupancyRate >= 55) return ['level' => 'Sangat Baik', 'color' => 'primary'];
+        if ($occupancyRate >= 40) return ['level' => 'Baik',        'color' => 'primary-light'];
+        return ['level' => 'Perlu Perhatian', 'color' => 'red'];
     }
 
     /**
-     * Get simple interpretation for managers
+     * Get contextual interpretation for managers — personalised per room type scale.
      */
     private function getInterpretation($occupancyRate, $avgRoomsPerDay, $totalRooms, $modelType)
     {
-        $scope = $modelType === 'single' ? 'seluruh hotel' : 'tipe kamar ini';
+        if ($modelType === 'single') {
+            return "Prediksi menunjukkan rata-rata {$occupancyRate}% kamar hotel terisi setiap harinya. " .
+                   "Dari total {$totalRooms} kamar, sekitar {$avgRoomsPerDay} kamar rata-rata akan terisi per hari.";
+        }
 
-        return "Prediksi menunjukkan okupansi {$scope} rata-rata {$occupancyRate}% per bulan. " .
-               "Artinya sekitar {$avgRoomsPerDay} dari {$totalRooms} kamar akan terisi setiap harinya.";
+        // Multi-output: personalise based on room type scale
+        if ($totalRooms <= 4) {
+            // Tiny type — use absolute room count as primary signal
+            $filledText = $avgRoomsPerDay >= 1
+                ? "sekitar {$avgRoomsPerDay} dari {$totalRooms} kamar terisi"
+                : "kurang dari 1 kamar terisi rata-rata";
+            return "Prediksi menunjukkan okupansi tipe ini rata-rata {$occupancyRate}% per bulan. " .
+                   "Artinya {$filledText} setiap harinya. " .
+                   "Dengan hanya {$totalRooms} kamar, setiap tamu sangat berdampak pada persentase ini.";
+        }
+
+        return "Prediksi menunjukkan okupansi tipe kamar ini rata-rata {$occupancyRate}% per bulan. " .
+               "Dari {$totalRooms} kamar, sekitar {$avgRoomsPerDay} kamar rata-rata akan terisi setiap harinya.";
     }
 
     /**
@@ -735,7 +826,10 @@ class PredictionController extends Controller
     {
         $comparisons = [];
         $predictionsByMonth = collect($predictions)->groupBy(function ($p) {
-            return Carbon::parse($p['predicted_for_date'])->format('Y-m');
+            // Use the raw_date field (YYYY-MM-DD from DB) to avoid UTC cast shifting
+            // midnight WIB dates to the previous month when serialized as ISO UTC.
+            $raw = $p['raw_date'] ?? $p['predicted_for_date'];
+            return substr($raw, 0, 7);
         });
 
         $months = $predictionsByMonth->keys()->sort()->values();
@@ -754,8 +848,8 @@ class PredictionController extends Controller
             $changePercent = $prevOccupancy > 0 ? ($change / $prevOccupancy) * 100 : 0;
 
             $comparisons[] = [
-                'from_month' => Carbon::parse($prevMonth . '-01')->format('M Y'),
-                'to_month' => Carbon::parse($currentMonth . '-01')->format('M Y'),
+                'from_month' => Carbon::createFromFormat('Y-m', $prevMonth)->translatedFormat('M Y'),
+                'to_month' => Carbon::createFromFormat('Y-m', $currentMonth)->translatedFormat('M Y'),
                 'prev_occupancy' => round($prevOccupancy, 1),
                 'current_occupancy' => round($currentOccupancy, 1),
                 'change' => round($change, 1),
@@ -765,27 +859,37 @@ class PredictionController extends Controller
             ];
         }
 
-        return $comparisons;
+        // Only return the most recent comparison (latest pair of months)
+        // Showing all historical pairs in a "current trend" card is misleading.
+        return $comparisons ? [end($comparisons)] : [];
     }
 
     /**
      * Get comparison interpretation
+     * Uses absolute change (percentage points) as primary trigger — more meaningful
+     * for occupancy data where relative % can be misleading at low base values.
      */
     private function getComparisonInterpretation($change, $changePercent)
     {
-        if (abs($change) < 2) {
-            return "Okupansi stabil dari bulan sebelumnya";
+        $abs = abs($change);
+
+        if ($abs < 2) {
+            return "Okupansi relatif stabil antar bulan";
         } elseif ($change > 0) {
-            if ($changePercent > 20) {
-                return "Peningkatan signifikan! Pertahankan momentum ini";
+            if ($abs >= 15) {
+                return "Kenaikan besar +" . round($abs, 1) . " poin — pertahankan momentum & pertimbangkan harga premium";
+            } elseif ($abs >= 8) {
+                return "Tren positif, okupansi naik " . round($abs, 1) . " poin — operasional normal";
             } else {
-                return "Tren positif, okupansi meningkat " . abs(round($change, 1)) . "%";
+                return "Sedikit meningkat +" . round($abs, 1) . " poin dari bulan sebelumnya";
             }
         } else {
-            if ($changePercent < -20) {
-                return "Penurunan drastis! Butuh aksi marketing segera";
+            if ($abs >= 15) {
+                return "Penurunan besar -" . round($abs, 1) . " poin — segera jalankan promosi & diskon";
+            } elseif ($abs >= 8) {
+                return "Okupansi turun " . round($abs, 1) . " poin — pertimbangkan strategi marketing";
             } else {
-                return "Okupansi menurun " . abs(round($change, 1)) . "%, perlu promosi";
+                return "Sedikit menurun -" . round($abs, 1) . " poin dari bulan sebelumnya";
             }
         }
     }
@@ -815,13 +919,12 @@ class PredictionController extends Controller
 
         return [
             'version' => $champion->version,
-            'mape' => round($champion->mape, 2),
-            'r2_score' => round($champion->r2_score, 4),
-            'rmse' => round($champion->rmse, 4),
+            'mape' => $champion->mape !== null ? round($champion->mape, 2) : null,
+            'r2_score' => $champion->r2_score !== null ? round($champion->r2_score, 4) : null,
+            'rmse' => $champion->rmse !== null ? round($champion->rmse, 4) : null,
             'trained_at' => $champion->trained_at ? Carbon::parse($champion->trained_at)->format('Y-m-d H:i') : $champion->created_at->format('Y-m-d H:i'),
             'model_path' => $champion->model_path,
             'status' => 'Active Champion',
-            'is_promoted' => $champion->is_promoted,
         ];
     }
 
@@ -834,11 +937,11 @@ class PredictionController extends Controller
      * particularly the is_peak_season feature, which allows the LSTM to differentiate between
      * predicting for June (peak) vs April (low season).
      *
-     * @param Collection $historicalData Collection of aggregated monthly data
+     * @param \Illuminate\Support\Collection $historicalData Collection of aggregated monthly data
      * @param Carbon $targetMonth The month we want to predict for
-     * @return Collection Extended collection with synthetic months
+     * @return \Illuminate\Support\Collection Extended collection with synthetic months
      */
-    private function projectHistoricalDataForward(Collection $historicalData, Carbon $targetMonth): Collection
+    private function projectHistoricalDataForward(\Illuminate\Support\Collection $historicalData, Carbon $targetMonth): \Illuminate\Support\Collection
     {
         // Sort ascending by date
         $sorted = $historicalData->sortBy('date');
@@ -853,7 +956,8 @@ class PredictionController extends Controller
         // Calculate how many months ahead we're predicting
         $monthsAhead = $lastDate->copy()->startOfMonth()->diffInMonths($targetMonth->copy()->startOfMonth());
 
-        // If predicting for the immediate next month or past, no projection needed
+        // Skip projection for immediate next month (already has enough recent data)
+        // For 2+ months ahead, use synthetic projection to vary inputs
         if ($monthsAhead <= 1) {
             return $sorted;
         }
@@ -884,11 +988,11 @@ class PredictionController extends Controller
     /**
      * Create a synthetic month by projecting from recent trends with seasonal adjustment.
      *
-     * @param Collection $historicalData All historical data so far (including previously generated synthetic months)
+     * @param \Illuminate\Support\Collection $historicalData All historical data so far (including previously generated synthetic months)
      * @param Carbon $targetDate The date for the synthetic month
      * @return object Synthetic month data matching HistoricalOccupancyData structure
      */
-    private function createSyntheticMonth(Collection $historicalData, Carbon $targetDate): object
+    private function createSyntheticMonth(\Illuminate\Support\Collection $historicalData, Carbon $targetDate): object
     {
         // Get last 3 months for trend calculation
         $recent = $historicalData->sortBy('date')->take(-3);
@@ -908,15 +1012,24 @@ class PredictionController extends Controller
 
         // Create synthetic data object matching HistoricalOccupancyData structure
         // IMPORTANT: These fields must match what FeatureEngineeringService expects
+        // Use actual hotel room distribution: STD=32, SPR=19, JS=2, FMY=3 (total=56)
+        $roomCapacities = config('ml.room_capacities', [
+            'STD' => 32,
+            'SPR' => 19,
+            'JS' => 2,
+            'FMY' => 3,
+        ]);
+        $totalCapacity = array_sum($roomCapacities);
+
         return (object) [
             'date' => $targetDate,
             'occupancy_rate' => round($adjustedOccupancy, 2),
             'total_occupancy' => round($adjustedRooms, 2),
             'kamar_terjual' => round($adjustedRooms, 2),
-            'kamar_std' => round($adjustedRooms * 0.35, 2), // Standard: 35%
-            'kamar_spr' => round($adjustedRooms * 0.30, 2), // Superior: 30%
-            'kamar_fmy' => round($adjustedRooms * 0.20, 2), // Family: 20%
-            'kamar_js' => round($adjustedRooms * 0.15, 2),  // Junior Suite: 15%
+            'kamar_std' => round($adjustedRooms * ($roomCapacities['STD'] / $totalCapacity), 2),
+            'kamar_spr' => round($adjustedRooms * ($roomCapacities['SPR'] / $totalCapacity), 2),
+            'kamar_fmy' => round($adjustedRooms * ($roomCapacities['FMY'] / $totalCapacity), 2),
+            'kamar_js' => round($adjustedRooms * ($roomCapacities['JS'] / $totalCapacity), 2),
         ];
     }
 
@@ -924,7 +1037,7 @@ class PredictionController extends Controller
      * Get seasonal adjustment factor based on month.
      * This is crucial for differentiating predictions across different months.
      *
-     * Peak season (Jun, Jul, Dec) gets boost, low season gets reduction.
+     * Peak season gets boost, low season gets reduction.
      * This ensures that the is_peak_season feature in FeatureEngineeringService
      * will have different values when predicting for June vs April.
      *
@@ -933,17 +1046,32 @@ class PredictionController extends Controller
      */
     private function getSeasonalFactor(int $month): float
     {
-        // Peak season (June, July, December) - high demand periods
-        if (in_array($month, [6, 7, 12])) {
+        // Get peak months from configuration (allows customization per hotel)
+        $peakMonths = config('ml.peak_months', [6, 7, 12]);
+
+        // Peak season - high demand periods
+        if (in_array($month, $peakMonths)) {
             return 1.20; // 20% boost
         }
 
-        // Shoulder season (May, August, November, January) - moderate demand
-        if (in_array($month, [5, 8, 11, 1])) {
+        // Calculate shoulder months (one month before/after peak)
+        $shoulderMonths = [];
+        foreach ($peakMonths as $peak) {
+            $before = $peak - 1;
+            $after = $peak + 1;
+            if ($before == 0) $before = 12;
+            if ($after == 13) $after = 1;
+            $shoulderMonths[] = $before;
+            $shoulderMonths[] = $after;
+        }
+        $shoulderMonths = array_unique($shoulderMonths);
+
+        // Shoulder season - moderate demand
+        if (in_array($month, $shoulderMonths)) {
             return 1.05; // 5% boost
         }
 
-        // Low season (Feb, Mar, Apr, Sep, Oct) - lower demand
+        // Low season - lower demand
         return 0.90; // 10% reduction
     }
 }

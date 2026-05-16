@@ -7,6 +7,8 @@ use App\Models\RoomType;
 use App\Models\HistoricalOccupancyData;
 use App\Models\ModelVersion;
 use App\Services\RetrainingScheduler;
+use App\Services\OccupancyCalculationService;
+use App\Services\RecommendationService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -20,57 +22,103 @@ class DashboardController extends Controller
         // Get all room types
         $roomTypes = RoomType::where('is_active', true)->get();
 
-        // Build date filters
-        $dateStart = $request->input('date_start', Carbon::now()->startOfMonth());
-        $dateEnd = $request->input('date_end', Carbon::now()->addMonths(3)->endOfMonth());
-        $roomTypeFilter = $request->input('room_types', null);
+        // Build date filters — default = 3 bulan terakhir data yang tersedia
+        $dbMinDate = HistoricalOccupancyData::min('date') ?? '2021-01-01';
+        $dbMaxDate = HistoricalOccupancyData::max('date') ?? now()->toDateString();
 
-        // Get MONTHLY predictions (next 3 months) - Multi-Output
-        $multiQuery = Prediction::with('roomType')
-            ->where('model_type', 'multi')
-            ->where('predicted_for_date', '>=', $dateStart)
-            ->where('predicted_for_date', '<=', $dateEnd);
+        // Default range: last 3 months of available data (not last 3 months from today)
+        $defaultStart = Carbon::parse($dbMaxDate)->subMonths(2)->startOfMonth()->toDateString();
+        $dateStart = Carbon::parse($request->input('date_start', $defaultStart))->startOfMonth();
+        $dateEnd   = Carbon::parse($request->input('date_end',   $dbMaxDate))->endOfMonth();
 
-        if ($roomTypeFilter) {
-            $multiQuery->whereIn('room_type_id', $roomTypeFilter);
+        // Cap date_end to the last date actually in DB
+        $maxHistoricalDate = Carbon::parse($dbMaxDate)->endOfMonth();
+        if ($dateEnd->gt($maxHistoricalDate)) {
+            $dateEnd = $maxHistoricalDate;
         }
 
-        $multiPredictions = $multiQuery->orderBy('predicted_for_date')->get();
+        $roomTypeFilter = $request->input('room_types', null);
 
-        // Get Single-Output predictions (total hotel occupancy)
-        $singleQuery = Prediction::where('model_type', 'single')
-            ->where('predicted_for_date', '>=', $dateStart)
-            ->where('predicted_for_date', '<=', $dateEnd);
+        // Get HISTORICAL data for the selected period
+        $historicalQuery = HistoricalOccupancyData::with('roomType')
+            ->whereBetween('date', [$dateStart, $dateEnd]);
 
-        $singlePredictions = $singleQuery->orderBy('predicted_for_date')->get();
+        if ($roomTypeFilter) {
+            $historicalQuery->whereIn('room_type_id', $roomTypeFilter);
+        }
 
-        // Calculate KPIs from Multi-Output predictions
-        $avgOccupancy = $multiPredictions->avg('predicted_occupancy_rate') ?? 0;
-        $predictedRevenue = $multiPredictions->sum('predicted_revenue') ?? 0;
+        $historicalData = $historicalQuery->orderBy('date')->get();
 
-        // Get last month's historical data for comparison
-        $lastMonth = Carbon::now()->subMonth();
-        $historicalData = HistoricalOccupancyData::with('roomType')
-            ->whereYear('date', $lastMonth->year)
-            ->whereMonth('date', $lastMonth->month)
+        // Get latest predictions — find the most recent prediction date and fetch up to 6 months around it.
+        // Do NOT filter by dbMaxDate: predictions may be for months that now fall inside historical data.
+        $latestPredDate = Prediction::max('predicted_for_date');
+        if ($latestPredDate) {
+            $predictionEnd   = Carbon::parse($latestPredDate)->endOfMonth();
+            $predictionStart = $predictionEnd->copy()->subMonths(5)->startOfMonth();
+        } else {
+            $predictionStart = Carbon::parse($dbMaxDate)->addDay()->startOfMonth();
+            $predictionEnd   = $predictionStart->copy()->addMonths(6)->endOfMonth();
+        }
+
+        $allPredictions = Prediction::with('roomType')
+            ->where('predicted_for_date', '>=', $predictionStart)
+            ->where('predicted_for_date', '<=', $predictionEnd)
+            ->orderBy('predicted_for_date')
             ->get();
 
-        $historicalRevenue = $historicalData->sum('revenue');
-        $historicalAvgOccupancy = $historicalData->avg('occupancy_rate') ?? 0;
+        $multiPredictions  = $allPredictions->where('model_type', 'multi');
+        $singlePredictions = $allPredictions->where('model_type', 'single');
 
-        // Calculate trends (comparing next month prediction vs last month actual)
-        $nextMonthPrediction = $multiPredictions->where('predicted_for_date', Carbon::now()->addMonth()->startOfMonth())->first();
+        // Calculate KPIs from HISTORICAL data in selected period
+        $occupancyService = app(OccupancyCalculationService::class);
+        $totalCapacity = $roomTypes->sum('total_rooms');
 
-        $revenueTrend = $historicalRevenue > 0 && $nextMonthPrediction
-            ? round((($nextMonthPrediction->predicted_revenue - $historicalRevenue) / $historicalRevenue) * 100, 1)
+        // Calculate stats from selected historical period
+        if ($historicalData->isNotEmpty()) {
+            // Use capacity-weighted average (not raw avg which treats all room types equally)
+            $avgOccupancy = $occupancyService->calculateWeightedOccupancy($historicalData, $roomTypes);
+            // Exclude revenue outlier rows (data-entry errors e.g. Rp 81B, Rp 18B)
+            $actualRevenue = $historicalData->filter(fn ($r) => ($r->revenue ?? 0) <= 50_000_000)->sum('revenue');
+        } else {
+            $avgOccupancy = 0;
+            $actualRevenue = 0;
+        }
+
+        // Get the most recent complete month for trend comparison
+        $lastHistoricalMonth = Carbon::parse($dbMaxDate)->startOfMonth();
+        $lastMonthData = $historicalData->filter(fn ($r) =>
+            Carbon::parse($r->date)->format('Y-m') === $lastHistoricalMonth->format('Y-m')
+        );
+
+        // Calculate year-over-year trends (comparing same month previous year)
+        $previousYearStart = $dateStart->copy()->subYear();
+        $previousYearEnd = $dateEnd->copy()->subYear();
+        $previousYearData = HistoricalOccupancyData::whereBetween('date', [$previousYearStart, $previousYearEnd])->get();
+
+        $previousYearRevenue = $previousYearData->filter(fn ($r) => ($r->revenue ?? 0) <= 50_000_000)->sum('revenue');
+        $previousYearOccupancy = $previousYearData->isNotEmpty()
+            ? $occupancyService->calculateWeightedOccupancy($previousYearData, $roomTypes)
             : 0;
 
-        $occupancyTrend = $historicalAvgOccupancy > 0 && $avgOccupancy > 0
-            ? round((($avgOccupancy - $historicalAvgOccupancy) / $historicalAvgOccupancy) * 100, 1)
+        $revenueTrend = $previousYearRevenue > 0 && $actualRevenue > 0
+            ? round((($actualRevenue - $previousYearRevenue) / $previousYearRevenue) * 100, 1)
             : 0;
 
-        // Prepare chart data for MONTHLY occupancy trend
-        $chartData = $this->prepareMonthlyChartData($multiPredictions, $singlePredictions);
+        $occupancyTrend = $previousYearOccupancy > 0 && $avgOccupancy > 0
+            ? round((($avgOccupancy - $previousYearOccupancy) / $previousYearOccupancy) * 100, 1)
+            : 0;
+
+        // Prepare chart data — always uses FULL historical range for the trend chart (not filtered period)
+        $allHistoricalData = HistoricalOccupancyData::with('roomType')
+            ->whereBetween('date', [Carbon::parse($dbMinDate)->startOfMonth(), Carbon::parse($dbMaxDate)->endOfMonth()])
+            ->orderBy('date')
+            ->get();
+        $chartData = $this->prepareMonthlyChartData($multiPredictions, $singlePredictions, $roomTypes, $allHistoricalData);
+
+        $chartDateRange = [
+            'start' => Carbon::parse($dbMinDate)->format('M Y'),
+            'end'   => Carbon::parse($dbMaxDate)->format('M Y'),
+        ];
 
         // Room breakdown data (next 3 months average)
         $roomBreakdown = $this->prepareRoomBreakdown($roomTypes, $multiPredictions);
@@ -85,9 +133,25 @@ class DashboardController extends Controller
         $multiChampion = $this->getChampionModelInfo('multi');
 
         // Model comparison data with LIVE metrics
+        // Akurasi = 100 - MAPE, dibulatkan 1 desimal
+        $singleAccuracy = $singleChampion['mape'] !== null
+            ? round(100 - $singleChampion['mape'], 1)
+            : null;
+        $multiAccuracy = $multiChampion['mape'] !== null
+            ? round(100 - $multiChampion['mape'], 1)
+            : null;
+
+        // Format tanggal update model (ganti versi teknis dengan tanggal)
+        $singleUpdatedAt = $singleChampion['trained_at']
+            ? Carbon::parse($singleChampion['trained_at'])->format('d F Y')
+            : null;
+        $multiUpdatedAt = $multiChampion['trained_at']
+            ? Carbon::parse($multiChampion['trained_at'])->format('d F Y')
+            : null;
+
         $modelComparison = [
             'single' => [
-                'name' => 'Single-Output (Total Hotel)',
+                'name' => 'Prediksi Total Hotel',
                 'predictions' => $singlePredictions->map(function ($pred) {
                     return [
                         'month' => Carbon::parse($pred->predicted_for_date)->format('M Y'),
@@ -97,12 +161,11 @@ class DashboardController extends Controller
                     ];
                 })->values(),
                 'avg_confidence' => round($singlePredictions->avg('confidence_level') ?? 0, 1),
-                'mape' => $singleChampion['mape'] ?? null,
-                'r2_score' => $singleChampion['r2_score'] ?? null,
-                'version' => $singleChampion['version'] ?? 'N/A',
+                'accuracy' => $singleAccuracy,
+                'updated_at' => $singleUpdatedAt,
             ],
             'multi' => [
-                'name' => 'Multi-Output (Per Room Type)',
+                'name' => 'Prediksi Per Tipe Kamar',
                 'predictions' => $monthlyPredictions->map(function ($monthPreds, $month) {
                     return [
                         'month' => Carbon::parse($month)->format('M Y'),
@@ -117,14 +180,16 @@ class DashboardController extends Controller
                     ];
                 })->values(),
                 'avg_confidence' => round($multiPredictions->avg('confidence_level'), 1),
-                'mape' => $multiChampion['mape'] ?? null,
-                'r2_score' => $multiChampion['r2_score'] ?? null,
-                'version' => $multiChampion['version'] ?? 'N/A',
+                'accuracy' => $multiAccuracy,
+                'updated_at' => $multiUpdatedAt,
             ],
         ];
 
         // Generate alerts/recommendations
         $alerts = $this->generateAlerts($multiPredictions, $singlePredictions, $avgOccupancy);
+
+        // Generate active recommendation for dashboard (next month)
+        $activeRecommendation = $this->generateActiveRecommendation($singlePredictions, $multiPredictions);
 
         // Get retraining status (6-month cycle tracking)
         $retrainingScheduler = app(RetrainingScheduler::class);
@@ -133,63 +198,77 @@ class DashboardController extends Controller
         return Inertia::render('Dashboard/Index', [
             'stats' => [
                 'avgOccupancy' => round($avgOccupancy, 1),
-                'predictedRevenue' => $predictedRevenue,
+                'actualRevenue' => $actualRevenue,
                 'totalRooms' => $roomTypes->sum('total_rooms'),
                 'occupancyTrend' => $occupancyTrend,
                 'revenueTrend' => $revenueTrend,
-                'multiPredictions' => $multiPredictions->count(),
-                'singlePredictions' => $singlePredictions->count(),
+                'historicalCount' => $historicalData->count(),
             ],
             'chartData' => $chartData,
             'roomBreakdown' => $roomBreakdown,
             'monthlyPredictions' => $monthlyPredictions,
             'modelComparison' => $modelComparison,
             'alerts' => $alerts,
+            'activeRecommendation' => $activeRecommendation,
             'retrainingStatus' => $retrainingStatus,
-            'lastUpdated' => $multiPredictions->max('prediction_date'),
+            'lastUpdated' => $multiPredictions->max('predicted_for_date'),
+            'chartDateRange' => $chartDateRange,
             'roomTypes' => $roomTypes,
             'filters' => [
-                'date_start' => $dateStart instanceof Carbon ? $dateStart->format('Y-m-d') : $dateStart,
-                'date_end' => $dateEnd instanceof Carbon ? $dateEnd->format('Y-m-d') : $dateEnd,
-                'room_types' => $roomTypeFilter,
+                'date_start'  => $dateStart->format('Y-m-d'),
+                'date_end'    => $dateEnd->format('Y-m-d'),
+                'room_types'  => $roomTypeFilter,
+                'db_min_date' => Carbon::parse($dbMinDate)->format('Y-m-d'),
+                'db_max_date' => Carbon::parse($dbMaxDate)->format('Y-m-d'),
             ],
         ]);
     }
 
-    private function prepareMonthlyChartData($multiPredictions, $singlePredictions)
+    private function prepareMonthlyChartData($multiPredictions, $singlePredictions, $roomTypes = null, $historicalData = null)
     {
-        // Get last 6 months of historical data (monthly aggregated)
-        $sixMonthsAgo = Carbon::now()->subMonths(6)->startOfMonth();
-        $lastMonth = Carbon::now()->subMonth()->endOfMonth();
+        // Reuse passed-in data to avoid duplicate queries
+        if (!$historicalData) {
+            $dbMinDate = HistoricalOccupancyData::min('date') ?? '2021-01-01';
+            $dbMaxDate = HistoricalOccupancyData::max('date') ?? now()->toDateString();
+            $historicalData = HistoricalOccupancyData::with('roomType')
+                ->whereBetween('date', [Carbon::parse($dbMinDate)->startOfMonth(), Carbon::parse($dbMaxDate)->endOfMonth()])
+                ->get();
+        }
 
-        $historicalData = HistoricalOccupancyData::with('roomType')
-            ->whereBetween('date', [$sixMonthsAgo, $lastMonth])
-            ->get();
+        if (!$roomTypes) {
+            $roomTypes = RoomType::where('is_active', true)->get();
+        }
 
-        // Group historical by month
+        $occupancyService = app(OccupancyCalculationService::class);
+
+        // Group historical by month with capacity-weighted occupancy
         $historical = $historicalData
             ->groupBy(function ($item) {
                 return Carbon::parse($item->date)->format('Y-m');
             })
-            ->map(function ($monthData, $month) {
+            ->map(function ($monthData, $month) use ($roomTypes, $occupancyService) {
+                $weightedOccupancy = $occupancyService->calculateWeightedOccupancy($monthData, $roomTypes);
+
                 return [
                     'date' => Carbon::parse($month . '-01')->format('Y-m-d'),
-                    'occupancy' => round($monthData->avg('occupancy_rate'), 1),
-                    'revenue' => $monthData->sum('revenue'),
+                    'occupancy' => round($weightedOccupancy, 1),
+                    'revenue' => $monthData->filter(fn ($r) => ($r->revenue ?? 0) <= 50_000_000)->sum('revenue'),
                 ];
             })
             ->sortBy('date')
             ->values();
 
-        // Prepare Multi-Output prediction data (grouped by month) - Use this as the main predicted data
+        // Prepare Multi-Output prediction data with capacity-weighted occupancy
         $predicted = $multiPredictions
             ->groupBy(function ($pred) {
                 return Carbon::parse($pred->predicted_for_date)->format('Y-m');
             })
-            ->map(function ($monthPreds, $month) {
+            ->map(function ($monthPreds, $month) use ($roomTypes, $occupancyService) {
+                $weightedOccupancy = $occupancyService->calculateWeightedOccupancy($monthPreds, $roomTypes);
+
                 return [
                     'date' => Carbon::parse($month . '-01')->format('Y-m-d'),
-                    'occupancy' => round($monthPreds->avg('predicted_occupancy_rate'), 1),
+                    'occupancy' => round($weightedOccupancy, 1),
                     'revenue' => $monthPreds->sum('predicted_revenue'),
                 ];
             })
@@ -211,21 +290,21 @@ class DashboardController extends Controller
         if ($lastPredictionDate && Carbon::parse($lastPredictionDate)->lt(Carbon::now()->subMonth())) {
             $alerts[] = [
                 'type' => 'warning',
-                'title' => 'Prediksi Perlu Diperbarui',
-                'message' => 'Prediksi terakhir dibuat ' . Carbon::parse($lastPredictionDate)->diffForHumans() . '. Regenerasi prediksi untuk data terbaru.',
-                'action' => 'Regenerate Predictions',
+                'title' => 'Prediksi Belum Diperbarui',
+                'message' => 'Prediksi belum diperbarui. Silakan buat prediksi terbaru agar informasi tetap akurat.',
+                'action' => 'Buat Prediksi',
                 'priority' => 'high',
             ];
         }
 
-        // High occupancy alert (>80%)
-        $highOccupancy = $multiPredictions->filter(fn($p) => $p->predicted_occupancy_rate > 80);
+        // High occupancy alert (>=55%)
+        $highOccupancy = $multiPredictions->filter(fn($p) => $p->predicted_occupancy_rate >= 55);
         if ($highOccupancy->count() > 0) {
             $alerts[] = [
                 'type' => 'success',
-                'title' => 'Okupansi Tinggi Diprediksi',
-                'message' => $highOccupancy->count() . ' prediksi menunjukkan okupansi >80%. Pertimbangkan menaikkan harga atau menawarkan upgrade.',
-                'action' => 'View Details',
+                'title' => 'Permintaan Kamar Diprediksi Tinggi',
+                'message' => 'Permintaan kamar diprediksi tinggi bulan depan. Pertimbangkan penyesuaian harga untuk memaksimalkan pendapatan.',
+                'action' => 'Lihat Detail',
                 'priority' => 'medium',
             ];
         }
@@ -235,22 +314,10 @@ class DashboardController extends Controller
         if ($lowOccupancy->count() > 0) {
             $alerts[] = [
                 'type' => 'warning',
-                'title' => 'Okupansi Rendah Terdeteksi',
-                'message' => $lowOccupancy->count() . ' prediksi menunjukkan okupansi <40%. Pertimbangkan promosi atau diskon untuk meningkatkan okupansi.',
-                'action' => 'Plan Promotion',
+                'title' => 'Tingkat Hunian Diprediksi Rendah',
+                'message' => 'Tingkat hunian diprediksi rendah. Pertimbangkan program promosi atau paket khusus untuk menarik lebih banyak tamu.',
+                'action' => 'Rencanakan Promosi',
                 'priority' => 'high',
-            ];
-        }
-
-        // Model confidence alert
-        $avgConfidence = $multiPredictions->avg('confidence_level') ?? 0;
-        if ($avgConfidence < 60) {
-            $alerts[] = [
-                'type' => 'info',
-                'title' => 'Confidence Level Rendah',
-                'message' => 'Rata-rata confidence model: ' . round($avgConfidence, 1) . '%. Pastikan data historis lengkap dan update.',
-                'action' => 'Check Data',
-                'priority' => 'medium',
             ];
         }
 
@@ -258,9 +325,9 @@ class DashboardController extends Controller
         if ($multiPredictions->isEmpty() && $singlePredictions->isEmpty()) {
             $alerts[] = [
                 'type' => 'error',
-                'title' => 'Tidak Ada Prediksi',
-                'message' => 'Belum ada prediksi tersedia. Generate prediksi untuk mendapatkan insight.',
-                'action' => 'Generate Now',
+                'title' => 'Belum Ada Prediksi',
+                'message' => 'Belum ada prediksi tersedia. Buat prediksi untuk mendapatkan rekomendasi strategi.',
+                'action' => 'Buat Prediksi Sekarang',
                 'priority' => 'high',
             ];
         }
@@ -270,22 +337,137 @@ class DashboardController extends Controller
 
     private function prepareRoomBreakdown($roomTypes, $predictions)
     {
+        // Tampilkan bulan terdekat yang akan datang, atau jika semua sudah lewat, bulan terbaru yang ada
+        $currentYearMonth = Carbon::now()->format('Y-m');
+        $upcomingPredictions = $predictions->filter(fn($p) =>
+            Carbon::parse($p->predicted_for_date)->format('Y-m') >= $currentYearMonth
+        );
+
+        if ($upcomingPredictions->isNotEmpty()) {
+            // Ada prediksi masa depan — ambil yang paling dekat
+            $nearestMonth = $upcomingPredictions->sortBy('predicted_for_date')->first()?->predicted_for_date;
+        } else {
+            // Semua prediksi sudah lewat — tampilkan yang paling terbaru
+            $nearestMonth = $predictions->sortByDesc('predicted_for_date')->first()?->predicted_for_date;
+        }
+
+        if ($nearestMonth) {
+            $nearestYearMonth = Carbon::parse($nearestMonth)->format('Y-m');
+            $predictions = $predictions->filter(fn($p) =>
+                Carbon::parse($p->predicted_for_date)->format('Y-m') === $nearestYearMonth
+            );
+        }
+
         return $roomTypes->map(function ($roomType) use ($predictions) {
             $roomPredictions = $predictions->where('room_type_id', $roomType->id);
-            $avgOccupancy = $roomPredictions->avg('predicted_occupancy_rate') ?? 0;
-            $predictedOccupied = round($roomType->total_rooms * ($avgOccupancy / 100));
+            $pred = $roomPredictions->first();
+            $occupancy = $pred ? (float) $pred->predicted_occupancy_rate : 0;
+            $predictedOccupied = $pred
+                ? (int) ($pred->predicted_rooms_occupied ?? round($roomType->total_rooms * ($occupancy / 100)))
+                : 0;
 
             return [
-                'id' => $roomType->id,
-                'name' => $roomType->name ?? 'Unknown',
-                'code' => $roomType->code ?? 'N/A',
-                'capacity' => $roomType->total_rooms ?? 0,
-                'predicted_occupied' => $predictedOccupied,
-                'occupancy_rate' => round($avgOccupancy, 1),
-                'base_price' => $roomType->base_price ?? 0,
-                'status' => $avgOccupancy >= 80 ? 'high' : ($avgOccupancy >= 50 ? 'medium' : 'low'),
+                'id'                => $roomType->id,
+                'name'              => $roomType->name ?? 'Unknown',
+                'code'              => $roomType->code ?? 'N/A',
+                'capacity'          => $roomType->total_rooms ?? 0,
+                'predicted_occupied'=> $predictedOccupied,
+                'occupancy_rate'    => round($occupancy, 1),
+                'base_price'        => $roomType->base_price ?? 0,
+                'status'            => $occupancy >= 55 ? 'high' : ($occupancy >= 40 ? 'medium' : 'low'),
             ];
         });
+    }
+
+    /**
+     * Hasilkan rekomendasi aktif untuk bulan depan (ditampilkan di dashboard utama).
+     * Menggunakan single-output prediction sebagai acuan utama.
+     */
+    private function generateActiveRecommendation($singlePredictions, $multiPredictions): ?array
+    {
+        // Gunakan bulan terdekat yang upcoming (>= bulan ini) dari multi predictions
+        $currentYearMonth = Carbon::now()->format('Y-m');
+
+        $upcomingMulti = $multiPredictions->filter(fn($p) =>
+            Carbon::parse($p->predicted_for_date)->format('Y-m') >= $currentYearMonth
+        );
+        $upcomingSingle = $singlePredictions->filter(fn($p) =>
+            Carbon::parse($p->predicted_for_date)->format('Y-m') >= $currentYearMonth
+        );
+
+        $nearestMulti = $upcomingMulti->isNotEmpty()
+            ? $upcomingMulti->sortBy('predicted_for_date')->first()
+            : $multiPredictions->sortByDesc('predicted_for_date')->first();
+
+        $nearestSingle = $upcomingSingle->isNotEmpty()
+            ? $upcomingSingle->sortBy('predicted_for_date')->first()
+            : $singlePredictions->sortByDesc('predicted_for_date')->first();
+
+        // Tentukan bulan acuan: prioritaskan multi, fallback ke single
+        if ($nearestMulti) {
+            $nearestMonth = Carbon::parse($nearestMulti->predicted_for_date)->format('Y-m');
+        } elseif ($nearestSingle) {
+            $nearestMonth = Carbon::parse($nearestSingle->predicted_for_date)->format('Y-m');
+        } else {
+            return null;
+        }
+
+        // Hitung rata-rata hunian dari multi predictions bulan terdekat
+        $monthMultiPreds = $multiPredictions->filter(
+            fn($p) => Carbon::parse($p->predicted_for_date)->format('Y-m') === $nearestMonth
+        );
+
+        if ($monthMultiPreds->isNotEmpty()) {
+            $occupancyService = app(\App\Services\OccupancyCalculationService::class);
+            $roomTypes = RoomType::where('is_active', true)->get();
+            $currentOcc = (float) $occupancyService->calculateWeightedOccupancy($monthMultiPreds, $roomTypes);
+            $referenceDate = $nearestMulti->predicted_for_date;
+        } elseif ($nearestSingle) {
+            $currentOcc = (float) $nearestSingle->predicted_occupancy_rate;
+            $referenceDate = $nearestSingle->predicted_for_date;
+        } else {
+            return null;
+        }
+
+        // Cari bulan sebelumnya untuk menentukan tren
+        $predMonth = Carbon::parse($referenceDate)->startOfMonth();
+        $prevMonth = $predMonth->copy()->subMonth();
+
+        $prevMultiPreds = $multiPredictions->filter(
+            fn($p) => Carbon::parse($p->predicted_for_date)->format('Y-m') === $prevMonth->format('Y-m')
+        );
+
+        if ($prevMultiPreds->isNotEmpty()) {
+            $occupancyService = $occupancyService ?? app(\App\Services\OccupancyCalculationService::class);
+            $roomTypes = $roomTypes ?? RoomType::where('is_active', true)->get();
+            $previousOcc = (float) $occupancyService->calculateWeightedOccupancy($prevMultiPreds, $roomTypes);
+        } else {
+            $prevSingle = $singlePredictions->filter(
+                fn($p) => Carbon::parse($p->predicted_for_date)->format('Y-m') === $prevMonth->format('Y-m')
+            )->first();
+
+            if ($prevSingle) {
+                $previousOcc = (float) $prevSingle->predicted_occupancy_rate;
+            } else {
+                $historicalPrevData = HistoricalOccupancyData::with('roomType')
+                    ->whereYear('date', $prevMonth->year)
+                    ->whereMonth('date', $prevMonth->month)
+                    ->get();
+                $occupancyService = $occupancyService ?? app(\App\Services\OccupancyCalculationService::class);
+                $roomTypes = $roomTypes ?? RoomType::where('is_active', true)->get();
+                $previousOcc = $historicalPrevData->isNotEmpty()
+                    ? (float) $occupancyService->calculateWeightedOccupancy($historicalPrevData, $roomTypes)
+                    : 0.0;
+            }
+        }
+
+        $recommendationService = app(RecommendationService::class);
+        $recommendation = $recommendationService->getRecommendation($currentOcc, $previousOcc);
+
+        return array_merge($recommendation, [
+            'for_month'      => Carbon::parse($referenceDate)->isoFormat('MMMM YYYY'),
+            'occupancy_rate' => round($currentOcc, 1),
+        ]);
     }
 
     /**
@@ -304,22 +486,25 @@ class DashboardController extends Controller
             return [
                 'version' => 'N/A',
                 'mape' => null,
-                'r2_score' => null,
-                'rmse' => null,
+                'accuracy' => null,
                 'trained_at' => null,
-                'status' => 'No champion model available',
+                'status' => 'Belum ada model aktif',
             ];
         }
 
+        $mape = $champion->mape !== null ? round($champion->mape, 2) : null;
+        $accuracy = $mape !== null ? round(100 - $mape, 1) : null;
+        $trainedAt = $champion->trained_at
+            ? Carbon::parse($champion->trained_at)->format('Y-m-d H:i')
+            : $champion->created_at->format('Y-m-d H:i');
+
         return [
             'version' => $champion->version,
-            'mape' => round($champion->mape, 2),
-            'r2_score' => round($champion->r2_score, 4),
-            'rmse' => round($champion->rmse, 4),
-            'trained_at' => $champion->trained_at ? Carbon::parse($champion->trained_at)->format('Y-m-d H:i') : $champion->created_at->format('Y-m-d H:i'),
-            'model_path' => $champion->model_path,
-            'status' => 'Active Champion',
-            'is_promoted' => $champion->is_promoted,
+            'mape' => $mape,
+            'accuracy' => $accuracy,
+            'trained_at' => $trainedAt,
+            'updated_label' => 'Diperbarui: ' . Carbon::parse($trainedAt)->format('d F Y'),
+            'status' => 'Model Aktif',
         ];
     }
 }

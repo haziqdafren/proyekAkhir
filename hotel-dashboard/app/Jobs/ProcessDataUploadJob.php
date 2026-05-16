@@ -18,7 +18,7 @@ class ProcessDataUploadJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $tries = 3;
+    public int $tries = 1;       // #11: retries on parse failure waste resources; retry is manual via UI
     public int $timeout = 600; // 10 minutes
 
     private TrainingUpload $upload;
@@ -80,11 +80,9 @@ class ProcessDataUploadJob implements ShouldQueue
             $this->upload->save();
             $this->upload->addLog("Inserted {$inserted} records to database");
 
-            // Dispatch retraining job
-            $this->upload->updateStatus('retraining');
-            $this->upload->addLog("Dispatching model retraining job");
-            
-            RetrainModelJob::dispatch($this->upload);
+            // Mark as completed — user will manually trigger retraining from the UI
+            $this->upload->updateStatus('completed');
+            $this->upload->addLog("Data berhasil disimpan. Tekan 'Latih Ulang Manual' untuk memperbarui model prediksi.");
 
         } catch (\Exception $e) {
             Log::error("Data upload processing failed", [
@@ -98,52 +96,47 @@ class ProcessDataUploadJob implements ShouldQueue
     }
 
     /**
-     * Insert parsed data into historical_occupancy_data table
+     * Insert parsed data into historical_occupancy_data table.
+     * Uses upsert() to avoid N+1 SELECT-before-write pattern (#1).
      */
     private function insertHistoricalData(array $dailyData): int
     {
         $roomTypes = RoomType::pluck('id', 'code');
-        $inserted = 0;
+        $rows = [];
 
         foreach ($dailyData as $day) {
-            $date = Carbon::parse($day['date']);
+            $date = Carbon::parse($day['date'])->toDateString();
 
             foreach ($day['room_breakdown'] as $typeCode => $breakdown) {
                 $roomTypeId = $roomTypes[$typeCode] ?? null;
                 if (!$roomTypeId) {
-                    $this->upload->addLog("Unknown room type: {$typeCode}", 'warning');
+                    $this->upload->addLog("Tipe kamar tidak dikenal: {$typeCode}", 'warning');
                     continue;
                 }
 
-                // Check if record already exists
-                $existing = HistoricalOccupancyData::where('date', $date->toDateString())
-                    ->where('room_type_id', $roomTypeId)
-                    ->first();
-
-                if ($existing) {
-                    // Update existing record
-                    $existing->update([
-                        'occupancy_rate' => $breakdown['occupancy_rate'],
-                        'rooms_available' => $breakdown['rooms_available'],
-                        'rooms_occupied' => $breakdown['rooms_occupied'],
-                        'revenue' => $breakdown['revenue'],
-                    ]);
-                } else {
-                    // Create new record
-                    HistoricalOccupancyData::create([
-                        'date' => $date->toDateString(),
-                        'room_type_id' => $roomTypeId,
-                        'occupancy_rate' => $breakdown['occupancy_rate'],
-                        'rooms_available' => $breakdown['rooms_available'],
-                        'rooms_occupied' => $breakdown['rooms_occupied'],
-                        'revenue' => $breakdown['revenue'],
-                    ]);
-                    $inserted++;
-                }
+                $rows[] = [
+                    'date'             => $date,
+                    'room_type_id'     => $roomTypeId,
+                    'occupancy_rate'   => $breakdown['occupancy_rate'],
+                    'rooms_available'  => $breakdown['rooms_available'],
+                    'rooms_occupied'   => $breakdown['rooms_occupied'],
+                    'revenue'          => $breakdown['revenue'],
+                ];
             }
         }
 
-        return $inserted;
+        if (empty($rows)) {
+            return 0;
+        }
+
+        // Single query: insert new rows, update existing on (date, room_type_id) conflict
+        HistoricalOccupancyData::upsert(
+            $rows,
+            ['date', 'room_type_id'],
+            ['occupancy_rate', 'rooms_available', 'rooms_occupied', 'revenue']
+        );
+
+        return count($rows);
     }
 
     /**

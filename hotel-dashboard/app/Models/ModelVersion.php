@@ -117,62 +117,65 @@ class ModelVersion extends Model
     }
 
     /**
-     * Check if this model is better than the champion
+     * Check if this model is better than the champion.
      *
-     * A model is considered better if:
-     * 1. It has valid R² score (between 0 and 1)
-     * 2. It has lower MAPE than the champion
-     * 3. If both have similar MAPE (within 1%), prefer higher R²
+     * Primary metric: MAPE (lower is better).
+     * Tiebreaker (MAPE within 1%): R² (higher is better).
      */
     public function isBetterThan(?self $champion): bool
     {
-        // If no champion exists, this becomes champion only if it has valid R²
+        // No champion — promote any trainable model
         if (!$champion) {
-            return $this->isValidModel();
+            return $this->isTrainable();
         }
 
-        // Current model must have valid metrics
-        if (!$this->isValidModel()) {
+        // New model must at least be trainable
+        if (!$this->isTrainable()) {
             return false;
         }
 
-        // If champion has invalid R², replace it
-        if (!$champion->isValidModel()) {
+        // Replace a broken champion with any trainable model
+        if (!$champion->isTrainable()) {
             return true;
         }
 
-        // Both models are valid - compare by MAPE primarily
-        $mapeDiff = abs($this->mape - $champion->mape);
+        // Both trainable — compare MAPE (primary metric, lower is better)
+        $mapeDiff = abs((float) $this->mape - (float) $champion->mape);
 
-        // If MAPE difference is significant (> 1%), use MAPE as primary metric
         if ($mapeDiff > 1.0) {
-            return $this->mape < $champion->mape;
+            return (float) $this->mape < (float) $champion->mape;
         }
 
-        // If MAPE is similar (within 1%), prefer higher R²
-        return $this->r2_score > $champion->r2_score;
+        // MAPE within 1% — prefer higher R² as tiebreaker
+        return (float) $this->r2_score > (float) $champion->r2_score;
     }
 
     /**
-     * Check if this model has valid performance metrics
-     *
-     * Valid model criteria:
-     * - R² score between 0 and 1 (negative means worse than baseline)
-     * - MAPE is reasonable (< 50%)
+     * A trainable model has finite, non-null metrics and MAPE < 100%.
+     * R² can be negative (model worse than baseline — still usable as a starting point).
      */
-    public function isValidModel(): bool
+    public function isTrainable(): bool
     {
-        // R² must be between 0 and 1
-        if ($this->r2_score === null || $this->r2_score < 0 || $this->r2_score > 1) {
+        if ($this->mape === null || $this->mape < 0 || $this->mape >= 100) {
             return false;
         }
 
-        // MAPE must be reasonable (less than 50%)
-        if ($this->mape === null || $this->mape < 0 || $this->mape > 50) {
+        if ($this->r2_score === null || $this->r2_score < -10 || $this->r2_score > 1) {
             return false;
         }
 
         return true;
+    }
+
+    /**
+     * A valid (good) model — R² is positive and MAPE is reasonable.
+     * Used for display / quality flags, not for promotion logic.
+     */
+    public function isValidModel(): bool
+    {
+        return $this->isTrainable()
+            && (float) $this->r2_score >= 0
+            && (float) $this->mape < 50;
     }
 
     /**

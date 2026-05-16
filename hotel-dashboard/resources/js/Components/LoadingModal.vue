@@ -85,9 +85,9 @@ const props = defineProps({
 });
 
 const tips = [
-  'Model LSTM sedang menganalisis data historis...',
+  'Sistem sedang menganalisis pola data historis...',
   'Proses prediksi membutuhkan waktu beberapa detik...',
-  'Sedang menghitung pola okupansi...',
+  'Sedang menghitung pola hunian...',
   'Menggunakan 6 bulan data terakhir untuk prediksi...',
 ];
 

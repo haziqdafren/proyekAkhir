@@ -1,181 +1,160 @@
 <template>
   <DashboardLayout>
-    <div class="p-8 space-y-8 max-w-[1400px] mx-auto">
-      <!-- Header with Compact Model Info -->
-      <div class="flex items-center justify-between">
-        <div class="flex-1">
-          <div class="flex items-center gap-3 mb-2">
-            <h1 class="text-3xl font-bold text-primary-dark">Prediksi Total Okupansi</h1>
-            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-gradient-to-r from-yellow-400 to-orange-400 text-white text-xs font-bold shadow-md">
-              <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
-              </svg>
-              MAPE {{ modelInfo?.mape ?? 'N/A' }}%
-            </span>
-          </div>
-          <div class="flex items-center gap-2 text-gray-600">
-            <span class="text-sm">Model LSTM Single-Output • Prediksi total okupansi hotel</span>
-            <button
-              @click="showModelInfo = !showModelInfo"
-              class="inline-flex items-center gap-1 text-xs text-primary hover:text-primary-dark font-medium"
-            >
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              Info Model
-            </button>
-          </div>
-
-          <!-- Compact Model Info - Collapsible -->
-          <div v-show="showModelInfo" class="mt-3 p-4 bg-blue-50 border border-blue-200 rounded-xl text-sm">
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <p class="font-semibold text-gray-900 mb-2 flex items-center gap-2">
-                  <span class="inline-block w-1.5 h-1.5 bg-green-600 rounded-full"></span>
-                  Cocok untuk:
-                </p>
-                <ul class="text-gray-700 space-y-1 text-xs pl-3.5">
-                  <li>• Laporan manajemen & forecast revenue</li>
-                  <li>• Perencanaan staff & inventory</li>
-                </ul>
-              </div>
-              <div>
-                <p class="font-semibold text-gray-900 mb-2 flex items-center gap-2">
-                  <span class="inline-block w-1.5 h-1.5 bg-amber-600 rounded-full"></span>
-                  Keterbatasan:
-                </p>
-                <ul class="text-gray-700 space-y-1 text-xs pl-3.5">
-                  <li>• Tidak detail per tipe kamar</li>
-                  <li>• Kurang cocok untuk pricing per room</li>
-                </ul>
-              </div>
-            </div>
+    <div class="px-6 py-6 space-y-5 max-w-[1400px] mx-auto">
+      <!-- Page Header -->
+      <div class="bg-primary-dark rounded-2xl px-6 py-4 shadow-card flex items-center justify-between gap-4">
+        <div class="flex items-center gap-3">
+          <Link href="/predictions" class="text-white/60 hover:text-white transition-colors">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+          </Link>
+          <div>
+            <h1 class="text-lg font-bold text-white leading-tight">Prediksi Total Hotel</h1>
+            <p class="text-xs text-white/60 mt-0.5">Keseluruhan hotel ({{ totalRooms || 56 }} kamar)</p>
           </div>
         </div>
-        <Link href="/predictions" class="px-5 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-2xl font-medium transition-colors">
-          ← Kembali
-        </Link>
+        <span class="px-3 py-1.5 rounded-xl text-xs font-bold bg-white/10 text-white border border-white/20 flex-shrink-0">
+          Akurasi: {{ modelAccuracy }}%
+        </span>
       </div>
 
       <!-- Month-to-Month Comparison -->
       <MonthComparisonCard :comparisons="comparisons" />
 
-      <!-- Recent Predictions - Hybrid Table -->
-      <div v-if="recentPredictions.length > 0" class="bg-white rounded-3xl shadow-sm border border-surface/30 overflow-hidden">
-        <div class="px-8 py-6 border-b border-surface/30">
-          <h2 class="text-xl font-semibold text-primary-dark">Hasil Prediksi & Insight</h2>
-          <p class="text-sm text-gray-500 mt-1">Klik baris untuk melihat rekomendasi detail</p>
+      <!-- Daftar Prediksi & Rekomendasi -->
+      <div v-if="recentPredictions.length > 0">
+        <div class="flex items-center justify-between px-1 mb-3">
+          <h2 class="text-sm font-semibold text-primary-dark">Prediksi & Rekomendasi</h2>
+          <p class="text-xs text-gray-400">{{ recentPredictions.length }} bulan tersimpan</p>
         </div>
 
-        <div class="overflow-x-auto">
-          <table class="w-full">
-            <thead class="bg-gray-50">
-              <tr>
-                <th class="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-8"></th>
-                <th class="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Bulan</th>
-                <th class="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Okupansi</th>
-                <th class="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Status</th>
-                <th class="px-6 py-4 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Aksi</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-gray-100">
-              <template v-for="prediction in recentPredictions" :key="prediction.id">
-                <!-- Main Row (Clickable) -->
-                <tr
-                  @click="toggleExpand(prediction.id)"
-                  class="hover:bg-blue-50/50 transition-colors cursor-pointer"
-                  :class="{ 'bg-blue-50/30': expandedRows.has(prediction.id) }"
+        <!-- One card = one month -->
+        <div class="space-y-4">
+          <div
+            v-for="prediction in paginatedPredictions"
+            :key="prediction.id"
+            :id="`pred-${prediction.id}`"
+            class="bg-white rounded-2xl shadow-card-md overflow-hidden border border-surface/30"
+            :class="{
+              'border-l-green-400': getUrgency(prediction) === 'low',
+              'border-l-amber-400': getUrgency(prediction) === 'medium',
+              'border-l-red-500':   getUrgency(prediction) === 'high',
+            }"
+            style="border-left-width: 4px;"
+          >
+
+            <div class="p-5">
+              <!-- Month + status row -->
+              <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-3">
+                  <p class="text-base font-bold text-primary-dark">{{ formatMonth(prediction.raw_date || prediction.predicted_for_date) }}</p>
+                  <span
+                    class="text-xs font-bold px-2.5 py-1 rounded-lg"
+                    :class="{
+                      'bg-green-100 text-green-700': getUrgency(prediction) === 'low',
+                      'bg-amber-100 text-amber-700': getUrgency(prediction) === 'medium',
+                      'bg-red-100 text-red-700':     getUrgency(prediction) === 'high',
+                    }"
+                  >{{ getLevelLabel(prediction) }}</span>
+                </div>
+                <button
+                  @click="confirmDelete(prediction)"
+                  class="p-1.5 text-gray-400 hover:text-red-500 transition-colors rounded-lg hover:bg-gray-50"
+                  title="Hapus prediksi"
                 >
-                  <!-- Expand Icon -->
-                  <td class="px-6 py-4">
-                    <svg
-                      class="w-5 h-5 text-gray-400 transition-transform"
-                      :class="{ 'rotate-90': expandedRows.has(prediction.id) }"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-                    </svg>
-                  </td>
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                </button>
+              </div>
 
-                  <!-- Month -->
-                  <td class="px-6 py-4">
-                    <span class="font-semibold text-primary-dark">{{ formatMonth(prediction.predicted_for_date) }}</span>
-                    <div class="text-xs text-gray-500 mt-0.5">{{ formatDate(prediction.created_at) }}</div>
-                  </td>
+              <!-- Metrics + Recommendation: 2 columns -->
+              <div class="flex flex-col md:flex-row gap-5">
 
-                  <!-- Occupancy -->
-                  <td class="px-6 py-4">
-                    <div class="flex items-baseline gap-2">
-                      <span class="text-2xl font-bold text-primary-dark">{{ Number(prediction.predicted_occupancy_rate || 0).toFixed(1) }}%</span>
-                      <span class="text-sm text-gray-500">({{ prediction.insights?.avg_rooms_per_day || calculateRooms(prediction.predicted_occupancy_rate) }} kamar/hari)</span>
-                    </div>
-                    <div class="w-full bg-gray-200 rounded-full h-1.5 mt-2">
-                      <div
-                        class="bg-primary h-1.5 rounded-full transition-all"
-                        :style="{ width: `${prediction.predicted_occupancy_rate}%` }"
-                      ></div>
-                    </div>
-                  </td>
+                <!-- LEFT: Occupancy metrics -->
+                <div class="flex-shrink-0 md:w-48">
+                  <p class="text-5xl font-black text-primary-dark leading-none">
+                    {{ Number(prediction.predicted_occupancy_rate || 0).toFixed(1) }}<span class="text-2xl font-bold text-primary-dark/40">%</span>
+                  </p>
+                  <p class="text-xs text-gray-400 mt-1.5 mb-3">{{ prediction.insights?.avg_rooms_per_day || calculateRooms(prediction.predicted_occupancy_rate) }} kamar/hari rata-rata</p>
+                  <div class="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden mb-1.5">
+                    <div
+                      class="h-full rounded-full transition-all duration-700"
+                      :class="{
+                        'bg-green-500': getUrgency(prediction) === 'low',
+                        'bg-amber-400': getUrgency(prediction) === 'medium',
+                        'bg-red-500':   getUrgency(prediction) === 'high',
+                      }"
+                      :style="{ width: `${prediction.predicted_occupancy_rate}%` }"
+                    ></div>
+                  </div>
+                  <div class="flex items-center justify-between">
+                    <p class="text-xs text-gray-400">{{ getTrendLabel(prediction) }}</p>
+                    <p class="text-xs text-gray-400">Target 70%</p>
+                  </div>
+                  <p v-if="prediction.insights?.estimated_revenue_formatted" class="text-sm font-bold text-primary-dark mt-3">
+                    {{ prediction.insights.estimated_revenue_formatted }}
+                    <span class="text-xs font-normal text-gray-400 ml-1">est. pendapatan</span>
+                  </p>
+                </div>
 
-                  <!-- Status -->
-                  <td class="px-6 py-4">
-                    <div v-if="prediction.insights" class="flex items-center gap-2">
-                      <span class="text-xl">{{ prediction.insights.performance.icon }}</span>
-                      <div>
-                        <div class="font-semibold text-sm" :class="`text-${prediction.insights.performance.color}-700`">
-                          {{ prediction.insights.performance.level }}
-                        </div>
-                        <div class="text-xs text-gray-500">Confidence: {{ Number(prediction.confidence_level || 0).toFixed(1) }}%</div>
-                      </div>
-                    </div>
-                    <span v-else class="inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold"
-                      :class="getConfidenceClass(prediction.confidence_level)">
-                      {{ Number(prediction.confidence_level || 0).toFixed(1) }}%
-                    </span>
-                  </td>
+                <!-- Divider -->
+                <div class="hidden md:block w-px bg-surface/40 flex-shrink-0"></div>
+                <div class="block md:hidden h-px bg-surface/40"></div>
 
-                  <!-- Actions -->
-                  <td class="px-6 py-4 text-center">
-                    <button
-                      @click.stop="confirmDelete(prediction)"
-                      class="inline-flex items-center px-3 py-2 text-sm font-medium text-red-600 hover:text-red-700 hover:bg-red-50 rounded-xl transition-colors"
-                      title="Hapus prediksi"
-                    >
-                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                      </svg>
-                    </button>
-                  </td>
-                </tr>
+                <!-- RIGHT: Recommendation -->
+                <div class="flex-1 min-w-0">
+                  <div
+                    v-if="prediction.insights?.yield_recommendation || prediction.insights?.interpretation"
+                    class="h-full rounded-xl p-4"
+                    :class="{
+                      'bg-green-50': getUrgency(prediction) === 'low',
+                      'bg-amber-50': getUrgency(prediction) === 'medium',
+                      'bg-red-50':   getUrgency(prediction) === 'high',
+                    }"
+                  >
+                    <p class="text-[10px] font-bold uppercase tracking-widest mb-2"
+                      :class="{
+                        'text-green-600': getUrgency(prediction) === 'low',
+                        'text-amber-600': getUrgency(prediction) === 'medium',
+                        'text-red-600':   getUrgency(prediction) === 'high',
+                      }"
+                    >Rekomendasi Manajemen</p>
+                    <p class="text-sm font-bold text-gray-900 leading-snug mb-2"
+                      v-if="prediction.insights?.yield_recommendation"
+                    >{{ prediction.insights.yield_recommendation.action }}</p>
+                    <p v-if="prediction.insights?.yield_recommendation?.detail"
+                      class="text-sm text-gray-600 leading-relaxed">{{ prediction.insights.yield_recommendation.detail }}</p>
+                    <p v-else-if="prediction.insights?.interpretation"
+                      class="text-sm text-gray-600 leading-relaxed">{{ prediction.insights.interpretation }}</p>
+                  </div>
+                  <div v-else class="h-full rounded-xl p-4 bg-gray-50 flex items-center justify-center">
+                    <p class="text-sm text-gray-400">Tidak ada rekomendasi tersedia</p>
+                  </div>
+                </div>
 
-                <!-- Expanded Row (Insights) -->
-                <tr v-if="expandedRows.has(prediction.id)" class="bg-gradient-to-br from-blue-50 to-indigo-50">
-                  <td colspan="5" class="px-6 py-6">
-                    <div class="max-w-5xl mx-auto">
-                      <PredictionInsightCard
-                        v-if="prediction.insights"
-                        :insights="prediction.insights"
-                        :month-name="formatMonth(prediction.predicted_for_date)"
-                      />
-                      <div v-else class="text-center text-gray-500 py-4">
-                        Loading insights...
-                      </div>
-                    </div>
-                  </td>
-                </tr>
-              </template>
-            </tbody>
-          </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Pagination -->
+        <div v-if="totalPages > 1" class="mt-4 bg-white rounded-2xl border border-surface/20 px-5 py-3 shadow-sm">
+          <Pagination
+            :current-page="currentPage"
+            :total-pages="totalPages"
+            :total="totalPredictions"
+            :per-page="PER_PAGE"
+            item-label="bulan prediksi"
+            @change="onPageChange"
+          />
         </div>
       </div>
 
       <!-- Empty State -->
-      <div v-else class="bg-white rounded-3xl shadow-sm border border-surface/30 p-12 text-center">
+      <div v-else class="bg-white rounded-2xl shadow-card-md border border-surface/20 p-10 text-center">
         <div class="max-w-md mx-auto">
-          <div class="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <svg class="w-10 h-10 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div class="w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <svg class="w-10 h-10 text-primary/50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
             </svg>
           </div>
@@ -185,20 +164,20 @@
       </div>
 
       <!-- Generate New Prediction - Collapsible (at bottom) -->
-      <div class="bg-white rounded-3xl shadow-sm border border-surface/30 overflow-hidden">
+      <div class="bg-white rounded-2xl shadow-card-md border border-surface/20 overflow-hidden">
         <button
           @click="showGenerateForm = !showGenerateForm"
-          class="w-full px-8 py-6 flex items-center justify-between hover:bg-gray-50 transition-colors"
+          class="w-full px-6 py-4 flex items-center justify-between bg-surface/20 hover:bg-surface/40 transition-colors"
         >
           <div class="flex items-center gap-3">
-            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-blue-600 flex items-center justify-center">
+            <div class="w-9 h-9 rounded-xl bg-primary flex items-center justify-center shadow-md">
               <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
               </svg>
             </div>
             <div>
-              <h2 class="text-xl font-semibold text-primary-dark text-left">Generate Prediksi Baru</h2>
-              <p class="text-sm text-gray-500 text-left">Buat prediksi untuk bulan berikutnya</p>
+              <h2 class="text-sm font-semibold text-primary-dark text-left">Tambah Prediksi Bulan Berikutnya</h2>
+              <p class="text-xs text-gray-500 text-left">Pilih bulan dan buat perkiraan tingkat hunian</p>
             </div>
           </div>
           <svg
@@ -212,18 +191,34 @@
           </svg>
         </button>
 
-        <div v-show="showGenerateForm" class="px-8 pb-8 pt-2 border-t border-surface/20">
+        <div v-show="showGenerateForm" class="px-6 pb-6 pt-3 border-t border-surface/20">
           <form @submit.prevent="generatePrediction" class="space-y-6">
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-2">Pilih Bulan untuk Prediksi</label>
-              <input
+              <Datepicker
                 v-model="selectedMonth"
-                type="month"
-                :min="minMonth"
-                class="w-full md:w-96 px-4 py-3 border border-surface rounded-2xl focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all"
-                required
-              />
-              <p class="text-xs text-gray-500 mt-2">Akan menggunakan 6 bulan data terakhir untuk prediksi</p>
+                month-picker
+                :min-date="minDate"
+                :max-date="maxDate"
+                :enable-time-picker="false"
+                auto-apply
+                :clearable="false"
+                :format="(date) => `${['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'][date.month]} ${date.year}`"
+                placeholder="Pilih bulan"
+                class="w-full md:w-96"
+              >
+                <template #dp-input="{ value }">
+                  <input
+                    type="text"
+                    :value="value"
+                    readonly
+                    class="w-full px-4 py-3 border border-surface rounded-2xl focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all cursor-pointer bg-white"
+                    placeholder="Pilih bulan"
+                    required
+                  />
+                </template>
+              </Datepicker>
+              <p class="text-xs text-gray-500 mt-2">Pilih bulan untuk prediksi ({{ new Date(minDate).toLocaleDateString('id-ID', {month:'long',year:'numeric'}) }} – {{ new Date(maxDate).toLocaleDateString('id-ID', {month:'long',year:'numeric'}) }})</p>
 
               <!-- Warning if month already has prediction -->
               <div v-if="monthAlreadyPredicted" class="mt-3 flex items-start gap-2 p-3 bg-yellow-50 border border-yellow-200 rounded-xl">
@@ -250,14 +245,14 @@
                 <svg v-else class="w-5 h-5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
-                {{ generating ? 'Generating...' : (monthAlreadyPredicted ? 'Perbarui Prediksi' : 'Generate Prediksi') }}
+                {{ generating ? 'Memproses...' : (monthAlreadyPredicted ? 'Perbarui Prediksi' : 'Buat Prediksi') }}
               </button>
 
-              <div v-if="$page.props.flash?.success" class="flex items-center gap-2 px-4 py-3 bg-green-50 border border-green-200 rounded-lg">
-                <svg class="w-5 h-5 text-green-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+              <div v-if="$page.props.flash?.success" class="flex items-center gap-2 px-4 py-3 bg-primary/5 border border-primary/20 rounded-lg">
+                <svg class="w-5 h-5 text-primary flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                   <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
                 </svg>
-                <p class="text-green-700 font-medium text-sm">{{ $page.props.flash.success }}</p>
+                <p class="text-primary font-medium text-sm">{{ $page.props.flash.success }}</p>
               </div>
               <div v-if="$page.props.errors?.error" class="flex items-center gap-2 px-4 py-3 bg-red-50 border border-red-200 rounded-lg">
                 <svg class="w-5 h-5 text-red-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
@@ -274,8 +269,8 @@
     <!-- Loading Modal -->
     <LoadingModal
       :show="generating"
-      title="Generating Prediction"
-      message="Model LSTM sedang menganalisis data historis dan membuat prediksi okupansi..."
+      title="Membuat Prediksi"
+      message="Sistem prediksi sedang menganalisis data historis dan membuat perkiraan hunian..."
     />
 
     <!-- Delete Confirmation Modal -->
@@ -298,8 +293,10 @@ import { router, Link } from '@inertiajs/vue3';
 import DashboardLayout from '@/Layouts/DashboardLayout.vue';
 import LoadingModal from '@/Components/LoadingModal.vue';
 import ConfirmModal from '@/Components/ConfirmModal.vue';
-import PredictionInsightCard from '@/Components/PredictionInsightCard.vue';
 import MonthComparisonCard from '@/Components/MonthComparisonCard.vue';
+import Pagination from '@/Components/Pagination.vue';
+import { VueDatePicker as Datepicker } from '@vuepic/vue-datepicker';
+import '@vuepic/vue-datepicker/dist/main.css';
 
 const props = defineProps({
   recentPredictions: Array,
@@ -307,21 +304,66 @@ const props = defineProps({
   totalRooms: Number,
   modelInfo: Object,
   roomTypes: Array,
+  dbMaxDate: String,
 });
 
-const selectedMonth = ref('');
+// Akurasi = 100 - MAPE, gunakan field accuracy jika tersedia
+const modelAccuracy = computed(() => {
+  if (props.modelInfo?.accuracy != null) return props.modelInfo.accuracy;
+  if (props.modelInfo?.mape != null) return parseFloat((100 - props.modelInfo.mape).toFixed(1));
+  return 'N/A';
+});
+
+const firstPredictableDate = computed(() => {
+  if (props.dbMaxDate) {
+    const d = new Date(props.dbMaxDate + 'T00:00:00');
+    d.setMonth(d.getMonth() + 1);
+    d.setDate(1);
+    return d;
+  }
+  const d = new Date();
+  d.setDate(1);
+  d.setMonth(d.getMonth() + 1);
+  return d;
+});
+
+const selectedMonth = ref(
+  (() => {
+    if (props.dbMaxDate) {
+      const d = new Date(props.dbMaxDate + 'T00:00:00');
+      return { month: (d.getMonth() + 1) % 12, year: d.getMonth() === 11 ? d.getFullYear() + 1 : d.getFullYear() };
+    }
+    const d = new Date();
+    return { month: (d.getMonth() + 1) % 12, year: d.getFullYear() };
+  })()
+);
+
 const generating = ref(false);
+const activePredictionId = ref(null);
 const showDeleteConfirm = ref(false);
 const predictionToDelete = ref(null);
-const expandedRows = ref(new Set());
-const showModelInfo = ref(false);
 const showGenerateForm = ref(false);
 
-// Set minimum month to next month
-const minMonth = computed(() => {
-  const nextMonth = new Date();
-  nextMonth.setMonth(nextMonth.getMonth() + 1);
-  return nextMonth.toISOString().slice(0, 7);
+// Pagination
+const PER_PAGE = 6;
+const currentPage = ref(1);
+const totalPredictions = computed(() => props.recentPredictions?.length ?? 0);
+const totalPages = computed(() => Math.ceil(totalPredictions.value / PER_PAGE));
+const paginatedPredictions = computed(() => {
+  const start = (currentPage.value - 1) * PER_PAGE;
+  return (props.recentPredictions ?? []).slice(start, start + PER_PAGE);
+});
+const onPageChange = (page) => {
+  currentPage.value = page;
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+};
+
+const minDate = computed(() => firstPredictableDate.value);
+
+const maxDate = computed(() => {
+  const d = new Date(firstPredictableDate.value);
+  d.setMonth(d.getMonth() + 13);
+  return d;
 });
 
 // Check if selected month already has a prediction
@@ -329,10 +371,9 @@ const monthAlreadyPredicted = computed(() => {
   if (!selectedMonth.value || !props.recentPredictions) return false;
 
   return props.recentPredictions.some(pred => {
-    const predDate = new Date(pred.predicted_for_date);
-    const selectedDate = new Date(selectedMonth.value + '-01');
-    return predDate.getFullYear() === selectedDate.getFullYear() &&
-           predDate.getMonth() === selectedDate.getMonth();
+    const ym = (pred.raw_date || pred.predicted_for_date || '').substring(0, 7);
+    const [y, m] = ym.split('-').map(Number);
+    return y === selectedMonth.value.year && (m - 1) === selectedMonth.value.month;
   });
 });
 
@@ -341,8 +382,13 @@ const generatePrediction = () => {
 
   generating.value = true;
 
+  // Convert month picker format to YYYY-MM-DD
+  const year = selectedMonth.value.year;
+  const month = String(selectedMonth.value.month + 1).padStart(2, '0'); // Convert from 0-indexed to 1-indexed
+  const formattedDate = `${year}-${month}-01`;
+
   router.post('/predictions/generate-single', {
-    predict_for_month: selectedMonth.value + '-01',
+    predict_for_month: formattedDate,
   }, {
     preserveScroll: true,
     onFinish: () => {
@@ -351,13 +397,20 @@ const generatePrediction = () => {
   });
 };
 
+const scrollToPrediction = (prediction) => {
+  activePredictionId.value = prediction.id;
+  const el = document.getElementById(`pred-${prediction.id}`);
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+};
+
 const confirmDelete = (prediction) => {
-  const predDate = new Date(prediction.predicted_for_date);
+  const ym = (prediction.raw_date || prediction.predicted_for_date || '').substring(0, 7);
+  const [predYear, predMonth] = ym.split('-').map(Number);
   predictionToDelete.value = {
     id: prediction.id,
-    year: predDate.getFullYear(),
-    month: predDate.getMonth() + 1,
-    monthName: formatMonth(prediction.predicted_for_date),
+    year: predYear,
+    month: predMonth,
+    monthName: formatMonth(prediction.raw_date || prediction.predicted_for_date),
   };
   showDeleteConfirm.value = true;
 };
@@ -374,16 +427,29 @@ const deletePrediction = () => {
   });
 };
 
-const toggleExpand = (id) => {
-  if (expandedRows.value.has(id)) {
-    expandedRows.value.delete(id);
-  } else {
-    expandedRows.value.add(id);
-  }
+const getUrgency = (prediction) => {
+  const rate = prediction.predicted_occupancy_rate;
+  if (rate >= 55) return 'low';      // green  — Hunian Tinggi
+  if (rate >= 40) return 'medium';   // yellow — Hunian Sedang
+  return 'high';                     // red    — Hunian Rendah
+};
+
+const getLevelLabel = (prediction) => {
+  return prediction.insights?.yield_recommendation?.level_label
+    || (prediction.predicted_occupancy_rate >= 55 ? 'Hunian Tinggi'
+      : prediction.predicted_occupancy_rate >= 40 ? 'Hunian Sedang' : 'Hunian Rendah');
+};
+
+const getTrendLabel = (prediction) => {
+  return prediction.insights?.yield_recommendation?.trend_label || 'Tren Stabil';
 };
 
 const formatMonth = (dateString) => {
-  return new Date(dateString).toLocaleDateString('id-ID', {
+  // Extract YYYY-MM from raw_date or ISO string to avoid UTC timezone shift
+  const ym = (dateString || '').substring(0, 7); // "YYYY-MM"
+  const [year, month] = ym.split('-').map(Number);
+  if (!year || !month) return dateString;
+  return new Date(year, month - 1, 1).toLocaleDateString('id-ID', {
     month: 'long',
     year: 'numeric',
   });
@@ -400,12 +466,23 @@ const formatDate = (dateString) => {
 };
 
 const calculateRooms = (occupancyRate) => {
-  return Math.round((occupancyRate / 100) * 58);
+  return Math.round((occupancyRate / 100) * (props.totalRooms || 56));
 };
 
 const getConfidenceClass = (confidence) => {
-  if (confidence >= 75) return 'bg-green-100 text-green-700';
+  if (confidence >= 75) return 'bg-primary/10 text-primary';
   if (confidence >= 60) return 'bg-yellow-100 text-yellow-700';
-  return 'bg-red-100 text-red-700';
+  return 'bg-primary/10 text-primary-dark';
+};
+
+// Map backend color tokens to Tailwind classes (no dynamic class strings — Tailwind purges them)
+const getPerformanceLevelClass = (color) => {
+  const map = {
+    'primary':       'text-primary',
+    'primary-light': 'text-primary',
+    'yellow':        'text-yellow-700',
+    'red':           'text-primary',
+  };
+  return map[color] || 'text-primary-dark';
 };
 </script>
