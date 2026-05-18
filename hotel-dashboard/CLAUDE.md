@@ -285,7 +285,7 @@ ML_API_KEY=your-secret-key      # Must match what Flask expects
 
 ---
 
-## Fresh Install Steps
+## Fresh Install Steps (after git clone)
 
 ```bash
 # 1. Install PHP dependencies
@@ -294,29 +294,62 @@ composer install
 # 2. Install JS dependencies
 npm install
 
-# 3. Copy env
+# 3. Copy env and generate app key
 cp .env.example .env
 php artisan key:generate
 
-# 4. Run migrations + seed
+# 4. Update ML_PYTHON_PATH in .env to your local venv path, e.g.:
+#    ML_PYTHON_PATH="/path/to/hotel-dashboard/venv/bin/python"
+
+# 5. Run migrations + seed (creates DB and room types)
 php artisan migrate --seed
 
-# 5. Create storage symlink
+# 6. Create storage symlink
 php artisan storage:link
 
-# 6. Set up Python venv
+# 7. Backfill historical revenue from the included Clean.xlsx
+#    (Run this AFTER migrate --seed, otherwise no records to update)
+php artisan tinker --execute="
+\$revenueMap = [];
+\$reader = new \PhpOffice\PhpSpreadsheet\Reader\Xlsx();
+\$spreadsheet = \$reader->load(storage_path('app/2021_2025_Clean.xlsx'));
+\$rows = \$spreadsheet->getActiveSheet()->toArray();
+array_shift(\$rows); // remove header
+foreach (\$rows as \$row) {
+    if (empty(\$row[0])) continue;
+    \$date = \Carbon\Carbon::parse(\$row[0])->format('Y-m-d');
+    \$revenue = (float) \$row[6];
+    if (\$revenue > 50000000) \$revenue = 50000000; // cap outliers
+    \$revenueMap[\$date] = (int) \$revenue;
+}
+\$updated = 0;
+foreach (\$revenueMap as \$date => \$rev) {
+    \$rows = DB::table('historical_occupancy_data')->where('date', \$date)->count();
+    if (\$rows > 0) {
+        DB::table('historical_occupancy_data')->where('date', \$date)->update(['revenue' => intval(\$rev / \$rows)]);
+        \$updated++;
+    }
+}
+echo 'Updated ' . \$updated . ' dates with revenue.' . PHP_EOL;
+"
+
+# 8. Set up Python venv
 python3 -m venv venv
 source venv/bin/activate
 pip install -r ml-api/requirements.txt
 
-# 7. Build frontend
+# 9. Build frontend
 npm run build
 
-# 8. Start servers (two terminals)
+# 10. Start servers (two separate terminals)
 php artisan serve
-# In another terminal:
+# Terminal 2:
 cd ml-api && /path/to/venv/bin/python app.py
 ```
+
+> **Note**: `database/database.sqlite` is NOT in git (contains real hotel data).
+> After fresh install you get seeded dummy data. The `storage/app/models/` champion
+> keras files ARE included — predictions will work immediately after setup.
 
 ---
 

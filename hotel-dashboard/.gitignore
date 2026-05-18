@@ -47,6 +47,11 @@ ml-api/__pycache__/
 /storage/framework/views/
 /storage/logs/
 
+# Explicitly allow model files and historical data (needed after fresh clone)
+!/storage/app/models/
+!/storage/app/models/**
+!/storage/app/2021_2025_Clean.xlsx
+
 # Backup files
 *.backup
 *.bak
