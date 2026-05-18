@@ -18,3 +18,12 @@ venv/
 # Excel temp files
 ~$*.xlsx
 ~$*.xls
+
+# Old model folders (consolidated into models/)
+single_output/
+multi_output/
+
+# Claude session files
+.claude/
+.remember/
+.venv/
